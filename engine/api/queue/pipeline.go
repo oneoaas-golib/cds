@@ -19,7 +19,7 @@ func NewPipelineBuildEventListener(DBFunc func() gorp.SqlExecutor) {
 	defer log.Fatalf("Goroutine of NewPipelineBuildEventListener exited - Exit CDS Engine")
 
 	for {
-		time.Sleep(2 * time.Second)
+		time.Sleep(10 * time.Millisecond)
 
 		//Check if CDS is in maintenance mode
 		var m bool
