@@ -29,12 +29,6 @@ func CheckParameterInPipeline(db gorp.SqlExecutor, pipelineID int64, paramName s
 
 // GetAllParametersInPipeline Get all parameters for the given pipeline
 func GetAllParametersInPipeline(db gorp.SqlExecutor, pipelineID int64 /*, args ...FuncArg*/) ([]sdk.Parameter, error) {
-	/*
-			c := structarg{}
-		for _, f := range args {
-			f(&c)
-		}
-	*/
 	parameters := []sdk.Parameter{}
 	query := `SELECT id, name, value, type, description
 	          FROM pipeline_parameter

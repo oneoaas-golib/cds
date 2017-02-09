@@ -4,11 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/lib/pq"
 	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // Pipeline represents the complete behavior of CDS for each projects
@@ -84,6 +85,12 @@ type PipelineBuildTrigger struct {
 	VCSChangesBranch    string         `json:"vcs_branch"`
 	VCSChangesHash      string         `json:"vcs_hash"`
 	VCSChangesAuthor    string         `json:"vcs_author"`
+}
+
+// NewPipelineBuildEvent is an event
+type NewPipelineBuildEvent struct {
+	Source  string               `json:"source"`
+	Trigger PipelineBuildTrigger `json:"trigger"`
 }
 
 // PipelineType defines the purpose of a given pipeline
