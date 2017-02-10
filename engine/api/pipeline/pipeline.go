@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-gorp/gorp"
 
-	"github.com/ovh/cds/engine/api/cache"
 	"github.com/ovh/cds/engine/api/trigger"
 	"github.com/ovh/cds/sdk"
 )
@@ -41,22 +40,12 @@ func CountPipelineByProject(db gorp.SqlExecutor, projectID int64) (int, error) {
 // LoadPipeline loads a pipeline from database
 func LoadPipeline(db gorp.SqlExecutor, projectKey, name string, deep bool) (*sdk.Pipeline, error) {
 	var p sdk.Pipeline
-
-	//Try to find pipeline in cache
-	_ = cache.Key("pipeline", projectKey, name)
-	//FIXME cache
-	//cache.Get(k, &p)
-	//if p.ID != 0 && p.Name != "" && len(p.Stages) > 0 {
-	//	return &p, nil
-	//}
-
-	var pType string
 	var lastModified time.Time
 	query := `SELECT pipeline.id, pipeline.name, pipeline.project_id, pipeline.type, pipeline.last_modified FROM pipeline
 	 		JOIN project on pipeline.project_id = project.id
 	 		WHERE pipeline.name = $1 AND project.projectKey = $2`
 
-	err := db.QueryRow(query, name, projectKey).Scan(&p.ID, &p.Name, &p.ProjectID, &pType, &lastModified)
+	err := db.QueryRow(query, name, projectKey).Scan(&p.ID, &p.Name, &p.ProjectID, &p.Type, &lastModified)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, sdk.ErrPipelineNotFound
@@ -64,7 +53,6 @@ func LoadPipeline(db gorp.SqlExecutor, projectKey, name string, deep bool) (*sdk
 		return nil, err
 	}
 	p.LastModified = lastModified.Unix()
-	p.Type = sdk.PipelineTypeFromString(pType)
 	p.ProjectKey = projectKey
 
 	if deep {
@@ -79,20 +67,17 @@ func LoadPipeline(db gorp.SqlExecutor, projectKey, name string, deep bool) (*sdk
 // LoadPipelineByID loads a pipeline from database
 func LoadPipelineByID(db gorp.SqlExecutor, pipelineID int64, deep bool) (*sdk.Pipeline, error) {
 	var p sdk.Pipeline
-	var pType string
 	query := `SELECT pipeline.name, pipeline.type, project.projectKey FROM pipeline
 	JOIN project on pipeline.project_id = project.id
 	WHERE pipeline.id = $1`
 
-	err := db.QueryRow(query, pipelineID).Scan(&p.Name, &pType, &p.ProjectKey)
+	err := db.QueryRow(query, pipelineID).Scan(&p.Name, &p.Type, &p.ProjectKey)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, sdk.ErrPipelineNotFound
 		}
 		return nil, err
 	}
-
-	p.Type = sdk.PipelineTypeFromString(pType)
 	p.ID = pipelineID
 
 	if deep {
@@ -238,14 +223,12 @@ func LoadPipelines(db gorp.SqlExecutor, projectID int64, loadDependencies bool, 
 
 	for rows.Next() {
 		var p sdk.Pipeline
-		var pType string
 		var lastModified time.Time
 
 		// scan pipeline id
-		if err := rows.Scan(&p.ID, &p.Name, &p.ProjectID, &pType, &lastModified); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.ProjectID, &p.Type, &lastModified); err != nil {
 			return nil, err
 		}
-		p.Type = sdk.PipelineTypeFromString(pType)
 		p.LastModified = lastModified.Unix()
 
 		if loadDependencies {

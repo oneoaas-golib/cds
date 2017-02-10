@@ -561,8 +561,8 @@ func loadTrigger(db gorp.SqlExecutor, s *sql.Rows, subqueries bool) (sdk.Pipelin
 		return t, err
 	}
 
-	t.SrcPipeline.Type = sdk.PipelineTypeFromString(srcPipType)
-	t.DestPipeline.Type = sdk.PipelineTypeFromString(destPipType)
+	t.SrcPipeline.Type = srcPipType
+	t.DestPipeline.Type = destPipType
 	// Handle nullable envirnoments
 	if destEnvName.Valid {
 		t.DestEnvironment.Name = destEnvName.String

@@ -16,7 +16,7 @@ import (
 type Pipeline struct {
 	ID                  int64             `json:"id" yaml:"-"`
 	Name                string            `json:"name"`
-	Type                PipelineType      `json:"type"`
+	Type                string            `json:"type"`
 	ProjectKey          string            `json:"projectKey"`
 	ProjectID           int64             `json:"-"`
 	LastPipelineBuild   *PipelineBuild    `json:"last_pipeline_build"`
@@ -87,41 +87,41 @@ type PipelineBuildTrigger struct {
 	VCSChangesAuthor    string         `json:"vcs_author"`
 }
 
-// NewPipelineBuildEvent is an event
-type NewPipelineBuildEvent struct {
-	Source  string               `json:"source"`
-	Trigger PipelineBuildTrigger `json:"trigger"`
+// PipelineRunEvent is an event
+type PipelineRunEvent struct {
+	ID           int64                  `json:"id" db:"id"`
+	Date         time.Time              `json:"date" db:"date"`
+	Source       string                 `json:"source" db:"source"`
+	Payload      map[string]interface{} `json:"payload" db:"-"`
+	Trigger      PipelineBuildTrigger   `json:"trigger" db:"-"`
+	ListenerUUID string                 `json:"listener" db:"listener_uuid"`
 }
 
-// PipelineType defines the purpose of a given pipeline
-type PipelineType string
+// PipelineRunEventListener is an event listener
+type PipelineRunEventListener struct {
+	UUID          string      `json:"uuid" db:"uuid"`
+	ApplicationID int64       `json:"-" db:"application_id"`
+	PipelineID    int64       `json:"-" db:"pipeline_id"`
+	EnvironmentID int64       `json:"-" db:"environment_id"`
+	Application   Application `json:"application" db:"-"`
+	Pipeline      Pipeline    `json:"pipeline" db:"-"`
+	Environment   Environment `json:"environment" db:"-"`
+}
 
 // Different types of Pipeline
 const (
-	BuildPipeline      PipelineType = "build"
-	DeploymentPipeline PipelineType = "deployment"
-	TestingPipeline    PipelineType = "testing"
+	BuildPipeline      = "build"
+	DeploymentPipeline = "deployment"
+	TestingPipeline    = "testing"
+	LambdaPipeline     = "lambda"
 )
 
 // AvailablePipelineType List of all pipeline type
 var AvailablePipelineType = []string{
-	string(BuildPipeline),
-	string(DeploymentPipeline),
-	string(TestingPipeline),
-}
-
-// PipelineTypeFromString returns the proper PipelineType
-func PipelineTypeFromString(in string) PipelineType {
-	switch in {
-	case string(BuildPipeline):
-		return BuildPipeline
-	case string(DeploymentPipeline):
-		return DeploymentPipeline
-	case string(TestingPipeline):
-		return TestingPipeline
-	default:
-		return BuildPipeline
-	}
+	BuildPipeline,
+	DeploymentPipeline,
+	TestingPipeline,
+	LambdaPipeline,
 }
 
 // PipelineAction represents an action in a pipeline
@@ -188,7 +188,7 @@ func GetPipeline(key, name string) (*Pipeline, error) {
 }
 
 // AddPipeline creates a new empty pipeline
-func AddPipeline(name string, projectKey string, pipelineType PipelineType, params []Parameter) error {
+func AddPipeline(name string, projectKey string, pipelineType string, params []Parameter) error {
 	p := Pipeline{
 		Name:       name,
 		ProjectKey: projectKey,

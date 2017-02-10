@@ -98,7 +98,7 @@ func GetAllPipelinesByID(db gorp.SqlExecutor, applicationID int64) ([]sdk.Applic
 		if err != nil {
 			return nil, err
 		}
-		p.Pipeline.Type = sdk.PipelineTypeFromString(typePipeline)
+		p.Pipeline.Type = typePipeline
 		p.LastModified = lastModified.Unix()
 		p.Pipeline.LastModified = pLastModified.Unix()
 		err := json.Unmarshal([]byte(args), &p.Parameters)
@@ -383,7 +383,7 @@ func LoadCDTree(db gorp.SqlExecutor, projectkey, appName string, user *sdk.User)
 			&root.Environment.ID, &root.Environment.Name, &rootTrigger); err != nil {
 			return nil, err
 		}
-		root.Pipeline.Type = sdk.PipelineTypeFromString(typePipeline)
+		root.Pipeline.Type = typePipeline
 
 		if root.Environment.ID == 0 {
 			root.Environment = sdk.DefaultEnv
@@ -508,8 +508,8 @@ func getChild(db gorp.SqlExecutor, parent *sdk.CDPipeline, user *sdk.User) error
 		}
 
 		if permission.AccessToPipeline(child.Trigger.DestEnvironment.ID, child.Trigger.DestPipeline.ID, user, permission.PermissionRead) {
-			child.Trigger.SrcPipeline.Type = sdk.PipelineTypeFromString(srcType)
-			child.Trigger.DestPipeline.Type = sdk.PipelineTypeFromString(destType)
+			child.Trigger.SrcPipeline.Type = srcType
+			child.Trigger.DestPipeline.Type = destType
 
 			child.Project = child.Trigger.DestProject
 			child.Application = child.Trigger.DestApplication
