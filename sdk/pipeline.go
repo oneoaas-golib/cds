@@ -87,27 +87,6 @@ type PipelineBuildTrigger struct {
 	VCSChangesAuthor    string         `json:"vcs_author"`
 }
 
-// PipelineRunEvent is an event
-type PipelineRunEvent struct {
-	ID           int64                  `json:"id" db:"id"`
-	Date         time.Time              `json:"date" db:"date"`
-	Source       string                 `json:"source" db:"source"`
-	Payload      map[string]interface{} `json:"payload" db:"-"`
-	Trigger      PipelineBuildTrigger   `json:"trigger" db:"-"`
-	ListenerUUID string                 `json:"listener" db:"listener_uuid"`
-}
-
-// PipelineRunEventListener is an event listener
-type PipelineRunEventListener struct {
-	UUID          string      `json:"uuid" db:"uuid"`
-	ApplicationID int64       `json:"-" db:"application_id"`
-	PipelineID    int64       `json:"-" db:"pipeline_id"`
-	EnvironmentID int64       `json:"-" db:"environment_id"`
-	Application   Application `json:"application" db:"-"`
-	Pipeline      Pipeline    `json:"pipeline" db:"-"`
-	Environment   Environment `json:"environment" db:"-"`
-}
-
 // Different types of Pipeline
 const (
 	BuildPipeline      = "build"

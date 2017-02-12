@@ -1240,3 +1240,22 @@ func RestartPipelineBuild(db gorp.SqlExecutor, pb *sdk.PipelineBuild) error {
 
 	return nil
 }
+
+// Run add a new pipeline in queue
+// Pipeline should be full loaded
+func Run(db gorp.SqlExecutor, proj *sdk.Project, pip *sdk.Pipeline, app *sdk.Application, env *sdk.Environment, t sdk.PipelineBuildTrigger, args ...sdk.Parameter) error {
+	//Check if we have a git.hash
+	p := sdk.ParameterFind(args, "git.hash")
+	if p != nil {
+		if repositoriesmanager.SkipByCommitMessage(db, proj, app, p.Value) {
+			return nil
+		}
+	}
+
+	//Insert the pipeline build
+	if _, err := InsertPipelineBuild(db, proj, pip, app, nil, args, env, 0, t); err != nil {
+		return err
+	}
+
+	return nil
+}

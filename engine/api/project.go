@@ -102,7 +102,7 @@ func updateProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *co
 	}
 
 	// Check is project exist
-	p, errProj := project.LoadProject(db, key, c.User)
+	p, errProj := project.Load(db, key, c.User)
 	if errProj != nil {
 		log.Warning("updateProject: Cannot load project from db: %s\n", errProj)
 		return errProj
@@ -139,7 +139,7 @@ func getProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *conte
 		}
 	}
 
-	p, errProj := project.LoadProject(db, key, c.User, project.WithVariables(), project.WithApplications(historyLength))
+	p, errProj := project.Load(db, key, c.User, project.WithVariables(), project.WithApplications(historyLength))
 	if errProj != nil {
 		log.Warning("getProject: Cannot load project from db: %s\n", errProj)
 		return errProj
@@ -306,7 +306,7 @@ func deleteProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *co
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
 
-	p, errProj := project.LoadProject(db, key, c.User)
+	p, errProj := project.Load(db, key, c.User)
 	if errProj != nil {
 		if errProj != sdk.ErrNoProject {
 			log.Warning("deleteProject: load project '%s' from db: %s\n", key, errProj)

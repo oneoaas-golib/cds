@@ -106,3 +106,18 @@ func ParameterFind(vars []Parameter, s string) *Parameter {
 	}
 	return nil
 }
+
+// ParametersFromMap returns a parameter array given a map
+func ParametersFromMap(m map[string]string) (res []Parameter) {
+	res = make([]Parameter, len(m))
+	var i int
+	for k, v := range m {
+		res[i] = Parameter{
+			Name:  k,
+			Value: v,
+			Type:  StringParameter,
+		}
+		i++
+	}
+	return
+}

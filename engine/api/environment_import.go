@@ -28,7 +28,7 @@ func importNewEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gor
 	key := vars["permProjectKey"]
 	format := r.FormValue("format")
 
-	proj, errProj := project.LoadProject(db, key, c.User, project.WithApplications(1), project.WithVariables())
+	proj, errProj := project.Load(db, key, c.User, project.WithApplications(1), project.WithVariables())
 	if errProj != nil {
 		log.Warning("importNewEnvironmentHandler> Cannot load %s: %s\n", key, errProj)
 		return errProj

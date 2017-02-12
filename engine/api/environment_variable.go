@@ -44,7 +44,7 @@ func restoreEnvironmentAuditHandler(w http.ResponseWriter, r *http.Request, db *
 		return sdk.ErrInvalidID
 	}
 
-	p, errProj := project.LoadProject(db, key, c.User)
+	p, errProj := project.Load(db, key, c.User)
 	if errProj != nil {
 		log.Warning("restoreEnvironmentAuditHandler: Cannot load project %s: %s\n", key, errProj)
 		return errProj
@@ -169,7 +169,7 @@ func deleteVariableFromEnvironmentHandler(w http.ResponseWriter, r *http.Request
 	envName := vars["permEnvironmentName"]
 	varName := vars["name"]
 
-	p, errProj := project.LoadProject(db, key, c.User)
+	p, errProj := project.Load(db, key, c.User)
 	if errProj != nil {
 		log.Warning("deleteVariableFromEnvironmentHandler: Cannot load project %s :  %s\n", key, errProj)
 		return errProj
@@ -238,7 +238,7 @@ func updateVariableInEnvironmentHandler(w http.ResponseWriter, r *http.Request, 
 	envName := vars["permEnvironmentName"]
 	varName := vars["name"]
 
-	p, errProj := project.LoadProject(db, key, c.User)
+	p, errProj := project.Load(db, key, c.User)
 	if errProj != nil {
 		log.Warning("updateVariableInEnvironment: Cannot load %s: %s\n", key, errProj)
 		return errProj
@@ -325,7 +325,7 @@ func addVariableInEnvironmentHandler(w http.ResponseWriter, r *http.Request, db 
 	envName := vars["permEnvironmentName"]
 	varName := vars["name"]
 
-	p, errProj := project.LoadProject(db, key, c.User)
+	p, errProj := project.Load(db, key, c.User)
 	if errProj != nil {
 		log.Warning("addVariableInEnvironmentHandler: Cannot load %s: %s\n", key, errProj)
 		return errProj

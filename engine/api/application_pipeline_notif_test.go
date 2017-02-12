@@ -27,7 +27,7 @@ import (
 func deleteAll(t *testing.T, db *gorp.DbMap, key string) error {
 	// Delete all apps
 	t.Logf("start deleted : %s", key)
-	proj, err := project.LoadProject(db, key, &sdk.User{Admin: true})
+	proj, err := project.Load(db, key, &sdk.User{Admin: true})
 	if err != nil {
 		return err
 	}

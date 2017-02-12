@@ -261,8 +261,8 @@ func loadproject(db gorp.SqlExecutor, key string) (*sdk.Project, error) {
 	return p, nil
 }
 
-// LoadProject loads an project from database
-func LoadProject(db gorp.SqlExecutor, key string, user *sdk.User, mods ...Mod) (*sdk.Project, error) {
+// Load loads an project from database
+func Load(db gorp.SqlExecutor, key string, user *sdk.User, mods ...Mod) (*sdk.Project, error) {
 	var c funcpar
 	for _, f := range mods {
 		f(&c)
