@@ -1,4 +1,4 @@
-package source
+package invoker
 
 import (
 	"time"
@@ -13,14 +13,10 @@ import (
 	"github.com/ovh/cds/sdk"
 )
 
-// EventListeneRoutiner si the main goroutine
-func EventListeneRoutiner(DBFunc func() gorp.SqlExecutor) {
-	// If this goroutine exits, then it's a crash
-	defer log.Fatalf("Goroutine of EventListener exited - Exit CDS Engine")
-
+// Listen si the main goroutine
+func Listen(DBFunc func() gorp.SqlExecutor) {
 	for {
 		time.Sleep(10 * time.Millisecond)
-
 		//Check if CDS is in maintenance mode
 		var m bool
 		cache.Get("maintenance", &m)
@@ -29,22 +25,22 @@ func EventListeneRoutiner(DBFunc func() gorp.SqlExecutor) {
 			time.Sleep(30 * time.Second)
 		}
 
-		var e sdk.PipelineRunEvent
-		cache.Dequeue("events_source", &e)
+		var e sdk.PipelineInvokeEvent
+		cache.Dequeue("pipeline_invoke_events", &e)
 
 		db := DBFunc()
 		if db != nil && !m {
-			if err := processEvent(db, e); err != nil {
-				log.Critical("source.EventListener> err while processing %s : %v", err, e)
+			if err := proces(db, e); err != nil {
+				log.Critical("invoker.Listen> err while processing %s : %v", err, e)
 			}
 			continue
 		} else {
-			cache.Enqueue("events_source", e)
+			cache.Enqueue("pipeline_invoke_events", e)
 		}
 	}
 }
 
-func processEvent(db gorp.SqlExecutor, e sdk.PipelineRunEvent) error {
+func proces(db gorp.SqlExecutor, e sdk.PipelineInvokeEvent) error {
 	if e.ListenerUUID == "" {
 		return sdk.ErrInvalidEvent
 	}
@@ -73,7 +69,6 @@ func processEvent(db gorp.SqlExecutor, e sdk.PipelineRunEvent) error {
 			t.VCSChangesBranch = arg.Value
 		case "git.author":
 			t.VCSChangesAuthor = arg.Value
-
 		}
 	}
 
