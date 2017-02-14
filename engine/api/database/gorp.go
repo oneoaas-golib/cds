@@ -24,7 +24,7 @@ var (
 
 //DBMap returns a propor intialized gorp.DBMap pointer
 func DBMap(db *sql.DB) *gorp.DbMap {
-	if db == lastDB && lastDBMap != nil && db == lastDBMap.Db {
+	if db != nil && db == lastDB && lastDBMap != nil && db == lastDBMap.Db {
 		return lastDBMap
 	}
 

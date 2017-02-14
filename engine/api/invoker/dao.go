@@ -98,7 +98,7 @@ func (e *PipelineInvoker) PostGet(db gorp.SqlExecutor) error {
 // InsertInvokerType inserts a PipelineInvokerType in DB
 func InsertInvokerType(db gorp.SqlExecutor, e *sdk.PipelineInvokerType) error {
 	t := PipelineInvokerType(*e)
-	if err := db.Insert(t); err != nil {
+	if err := db.Insert(&t); err != nil {
 		return err
 	}
 	*e = (sdk.PipelineInvokerType(t))
@@ -108,11 +108,13 @@ func InsertInvokerType(db gorp.SqlExecutor, e *sdk.PipelineInvokerType) error {
 // UpdateInvokerType updates a PipelineInvokerType in DB
 func UpdateInvokerType(db gorp.SqlExecutor, e *sdk.PipelineInvokerType) error {
 	t := PipelineInvokerType(*e)
-	n, err := db.Update(t)
+	n, err := db.Update(&t)
 	if err != nil {
+		log.Warning("UpdateInvokerType> Unable to update %d :%s", e.ID, err)
 		return err
 	}
 	if n == 0 {
+		log.Warning("UpdateInvokerType> Unable to update %d; not found", e.ID)
 		return sdk.ErrPipelineInvokerNotFound
 	}
 	*e = (sdk.PipelineInvokerType(t))

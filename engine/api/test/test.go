@@ -43,6 +43,14 @@ func init() {
 
 type bootstrap func(func() *gorp.DbMap) error
 
+type testLogger struct {
+	t *testing.T
+}
+
+func (t testLogger) Printf(format string, v ...interface{}) {
+	t.t.Logf(format, v...)
+}
+
 // SetupPG setup PG DB for test
 func SetupPG(t *testing.T, bootstrapFunc ...bootstrap) *gorp.DbMap {
 	DBDriver = flag.Lookup("dbDriver").Value.String()
@@ -93,5 +101,10 @@ func SetupPG(t *testing.T, bootstrapFunc ...bootstrap) *gorp.DbMap {
 		}
 	}
 
-	return database.DBMap(db)
+	dbmap := database.DBMap(db)
+	if os.Getenv("GORP_TRACE") != "" {
+		dbmap.TraceOn("[GORP]     Query>", testLogger{t})
+	}
+
+	return dbmap
 }

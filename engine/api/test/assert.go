@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	dump "github.com/fsamin/go-dump"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,6 +26,18 @@ func NotEmpty(t *testing.T, i interface{}, msg ...interface{}) {
 	if !assert.NotEmpty(t, i) {
 		t.Fatal(msg...)
 	}
+}
+
+func EqualValues(t *testing.T, expected, actual interface{}, msg ...interface{}) {
+	s1, err := dump.Sdump(expected)
+	if err != nil {
+		panic(err)
+	}
+	s2, err := dump.Sdump(actual)
+	if err != nil {
+		panic(err)
+	}
+	assert.Equal(t, s1, s2, expected)
 }
 
 func interfaceSlice(slice interface{}) []interface{} {
