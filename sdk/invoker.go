@@ -19,7 +19,8 @@ type PipelineInvoker struct {
 	Application   Application         `json:"application" db:"-"`
 	Pipeline      Pipeline            `json:"pipeline" db:"-"`
 	Environment   Environment         `json:"environment" db:"-"`
-	Type          PipelineInvokerType `json:"type" db:"pipeline_invoker_type_id"`
+	Type          PipelineInvokerType `json:"type" db:"-"`
+	TypeID        int64               `json:"-" db:"pipeline_invoker_type_id"`
 }
 
 // PipelineInvokerType is a type of listener

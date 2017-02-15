@@ -33,6 +33,9 @@ func Insert(db gorp.SqlExecutor, e *sdk.PipelineInvoker) error {
 	if e.PipelineID == 0 {
 		e.PipelineID = e.Pipeline.ID
 	}
+	if e.TypeID == 0 {
+		e.TypeID = e.Type.ID
+	}
 
 	var edb PipelineInvoker
 	edb = PipelineInvoker(*e)
@@ -76,22 +79,28 @@ func Load(db gorp.SqlExecutor, uuid string) (*sdk.PipelineInvoker, error) {
 func (e *PipelineInvoker) PostGet(db gorp.SqlExecutor) error {
 	app, err := application.LoadApplicationByID(db, e.ApplicationID)
 	if err != nil {
-		log.Warning("source.PostGest> Unable load load application %d: %s", e.ApplicationID, err)
+		log.Warning("source.PostGest> Unable load application %d: %s", e.ApplicationID, err)
 		return err
 	}
 	pip, err := pipeline.LoadPipelineByID(db, e.PipelineID, true)
 	if err != nil {
-		log.Warning("source.PostGest> Unable load load pipeline %d: %s", e.PipelineID, err)
+		log.Warning("source.PostGest> Unable load pipeline %d: %s", e.PipelineID, err)
 		return err
 	}
 	env, err := environment.LoadEnvironmentByID(db, e.EnvironmentID)
 	if err != nil {
-		log.Warning("source.PostGest> Unable load load env %d: %s", e.EnvironmentID, err)
+		log.Warning("source.PostGest> Unable load env %d: %s", e.EnvironmentID, err)
+		return err
+	}
+	t, err := LoadInvokerType(db, e.TypeID)
+	if err != nil {
+		log.Warning("source.PostGest> Unable load pipeline invoker type %d: %s", e.TypeID, err)
 		return err
 	}
 	e.Application = *app
 	e.Pipeline = *pip
 	e.Environment = *env
+	e.Type = *t
 	return nil
 }
 
@@ -150,7 +159,7 @@ func LoadInvokerType(db gorp.SqlExecutor, id int64) (*sdk.PipelineInvokerType, e
 }
 
 // LoadAllInvokerTypes loads all pipeline invoker types
-func LoadAllInvokerTypes(db gorp.SqlExecutor, id int64) ([]sdk.PipelineInvokerType, error) {
+func LoadAllInvokerTypes(db gorp.SqlExecutor) ([]sdk.PipelineInvokerType, error) {
 	var tdbs []PipelineInvokerType
 	if _, err := db.Select(&tdbs, "select * from pipeline_invoker_type"); err != nil {
 		return nil, err
