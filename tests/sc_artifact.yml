@@ -2,7 +2,7 @@ name: Artifact TestSuite
 testcases:
 - name: prepare test
   steps:
-  - script: cds project remove --force ITSCARTIFACT || true
+  - script: cds project remove --force ITSCARTIFACT
   - script: cds project add ITSCARTIFACT ITSCARTIFACT ITSCARTIFACT
   - script: cds application add ITSCARTIFACT TestApp
 
@@ -29,3 +29,4 @@ testcases:
   steps:
   - script: cds project remove --force ITSCARTIFACT
   - script: cds action remove IT_SC_cdsartifacttest
+  - script: cds group remove ITSCARTIFACT
