@@ -3,14 +3,15 @@ package invoker
 import (
 	"testing"
 
-	dump "github.com/fsamin/go-dump"
+	"github.com/fsamin/go-dump"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ovh/cds/engine/api/application"
 	"github.com/ovh/cds/engine/api/bootstrap"
 	"github.com/ovh/cds/engine/api/pipeline"
 	"github.com/ovh/cds/engine/api/test"
 	"github.com/ovh/cds/engine/api/test/assets"
 	"github.com/ovh/cds/sdk"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestInsertInvokerType(t *testing.T) {

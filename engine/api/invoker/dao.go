@@ -1,11 +1,10 @@
 package invoker
 
 import (
-	"github.com/go-gorp/gorp"
-
 	"database/sql"
-
 	"encoding/json"
+
+	"github.com/go-gorp/gorp"
 
 	"github.com/ovh/cds/engine/api/application"
 	"github.com/ovh/cds/engine/api/environment"
