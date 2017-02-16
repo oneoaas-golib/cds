@@ -76,7 +76,7 @@ func rollbackPipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 			return sdk.ErrNoEnvironment
 		}
 
-		if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
+		if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
 			log.Warning("rollbackPipelineHandler> No enought right on this environment %s: \n", request.Env.Name)
 			return sdk.ErrForbidden
 		}
@@ -85,7 +85,7 @@ func rollbackPipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 		env = &sdk.DefaultEnv
 	}
 
-	if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
+	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
 		log.Warning("rollbackPipelineHandler> You do not have Execution Right on this environment %s\n", env.Name)
 		return sdk.ErrNoEnvExecution
 	}
@@ -138,15 +138,10 @@ func loadDestEnvFromRunRequest(db *gorp.DbMap, c *context.Ctx, request *sdk.RunR
 			log.Warning("loadDestEnvFromRunRequest> Cannot load destination environment: %s", err)
 			return nil, sdk.ErrNoEnvironment
 		}
-
-		if envDest.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(envDest.ID, c.User, permission.PermissionReadExecute) {
-			log.Warning("loadDestEnvFromRunRequest> No enought right on this environment %s: \n", request.Env.Name)
-			return nil, sdk.ErrForbidden
-		}
 	}
-	if envDest.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(envDest.ID, c.User, permission.PermissionReadExecute) {
+	if !permission.AccessToEnvironment(envDest.ID, c.User, permission.PermissionReadExecute) {
 		log.Warning("loadDestEnvFromRunRequest> You do not have Execution Right on this environment\n")
-		return nil, sdk.ErrNoEnvExecution
+		return nil, sdk.ErrForbidden
 	}
 	return envDest, nil
 }
@@ -631,24 +626,10 @@ func addPipeline(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 		return err
 	}
 
-	sharedInfraPresent := false
-	for _, g := range project.ProjectGroups {
-		if g.Group.Name == group.SharedInfraGroup {
-			sharedInfraPresent = true
-			break
-		}
-	}
 
 	if err := group.InsertGroupsInPipeline(tx, project.ProjectGroups, p.ID); err != nil {
 		log.Warning("addPipelineHandler> Cannot add groups on pipeline: %s\n", err)
 		return err
-	}
-
-	if !sharedInfraPresent {
-		if err := group.AddGlobalGroupToPipeline(tx, p.ID); err != nil {
-			log.Warning("addPipelineHandler> Cannot add Global infra group: %s\n", err)
-			return err
-		}
 	}
 
 	for _, app := range p.AttachedApplication {
@@ -772,7 +753,7 @@ func getPipelineHistoryHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 		}
 	}
 
-	if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
+	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
 		log.Warning("getPipelineHistoryHandler> No enought right on this environment %s: \n", envName)
 		return sdk.ErrForbidden
 
@@ -1195,16 +1176,11 @@ func stopPipelineBuildHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 			log.Warning("stopPipelineBuildHandler> Cannot load environment %s: %s\n", envName, err)
 			return err
 		}
-
-		if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
-			log.Warning("stopPipelineBuildHandler> No enought right on this environment %s: \n", env.Name)
-			return sdk.ErrForbidden
-		}
 	}
 
-	if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
+	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
 		log.Warning("stopPipelineBuildHandler> You do not have Execution Right on this environment %s\n", env.Name)
-		return sdk.ErrNoEnvExecution
+		return sdk.ErrForbidden
 	}
 
 	pb, err := pipeline.LoadPipelineBuildByApplicationPipelineEnvBuildNumber(db, app.ID, pip.ID, env.ID, buildNumber)
@@ -1295,7 +1271,7 @@ func restartPipelineBuildHandler(w http.ResponseWriter, r *http.Request, db *gor
 
 		}
 
-		if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
+		if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
 			log.Warning("restartPipelineBuildHandler> No enought right on this environment %s: \n", envName)
 			return sdk.ErrForbidden
 
@@ -1312,7 +1288,7 @@ func restartPipelineBuildHandler(w http.ResponseWriter, r *http.Request, db *gor
 		return errFinal
 	}
 
-	if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
+	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadExecute) {
 		log.Warning("restartPipelineBuildHandler> You do not have Execution Right on this environment %s\n", env.Name)
 		return sdk.ErrNoEnvExecution
 	}
@@ -1377,7 +1353,7 @@ func getPipelineCommitsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 		}
 	}
 
-	if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
+	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
 		log.Warning("getPipelineCommitsHandler> No enought right on this environment %s: \n", envName)
 		return sdk.ErrForbidden
 
@@ -1485,7 +1461,7 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 		}
 	}
 
-	if env.ID != sdk.DefaultEnv.ID && !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
+	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
 		log.Warning("getPipelineHistoryHandler> No enought right on this environment %s: \n", envName)
 		return sdk.ErrForbidden
 

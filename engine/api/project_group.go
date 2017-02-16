@@ -58,7 +58,7 @@ func deleteGroupFromProjectHandler(w http.ResponseWriter, r *http.Request, db *g
 		return err
 
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("deleteGroupFromProjectHandler: Cannot commit transaction:  %s\n", err)
@@ -160,7 +160,7 @@ func updateGroupRoleOnProjectHandler(w http.ResponseWriter, r *http.Request, db 
 		return err
 
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("updateGroupRoleHandler: Cannot start transaction: %s\n", err)
@@ -422,7 +422,7 @@ func addGroupInProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c
 		return err
 
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("AddGroupInProject: Cannot commit transaction:  %s\n", err)

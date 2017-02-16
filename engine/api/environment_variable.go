@@ -100,7 +100,7 @@ func restoreEnvironmentAuditHandler(w http.ResponseWriter, r *http.Request, db *
 		log.Warning("restoreEnvironmentAuditHandler> Cannot update project last modified date: %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("restoreEnvironmentAuditHandler: Cannot commit transaction:  %s\n", err)
@@ -203,7 +203,7 @@ func deleteVariableFromEnvironmentHandler(w http.ResponseWriter, r *http.Request
 		log.Warning("deleteVariableFromEnvironmentHandler: Cannot update project last modified date: %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("deleteVariableFromEnvironmentHandler: Cannot commit transaction:  %s\n", err)
@@ -285,7 +285,7 @@ func updateVariableInEnvironmentHandler(w http.ResponseWriter, r *http.Request, 
 		log.Warning("updateVariableInEnvironmentHandler: Cannot update project last modified date:  %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("updateVariableInEnvironmentHandler: Cannot commit transaction:  %s\n", err)
@@ -381,7 +381,7 @@ func addVariableInEnvironmentHandler(w http.ResponseWriter, r *http.Request, db 
 		log.Warning("addVariableInEnvironmentHandler: Cannot update project last modified date:  %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("addVariableInEnvironmentHandler: cannot commit tx: %s\n", err)

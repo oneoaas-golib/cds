@@ -464,7 +464,7 @@ func cloneApplicationHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 		log.Warning("cloneApplicationHandler> Cannot update project last modified date: %s\n", errLM)
 		return errLM
 	}
-	projectData.LastModified = lastModified.Unix()
+	projectData.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("cloneApplicationHandler> Cannot commit transaction : %s\n", err)

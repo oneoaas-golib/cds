@@ -222,7 +222,7 @@ func updateEnvironmentsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 		log.Warning("updateEnvironmentsHandler> Cannot update project last modified date: %s\n", err)
 		return err
 	}
-	projectData.LastModified = lastModified.Unix()
+	projectData.LastModified = lastModified
 	projectData.Environments = envs
 
 	err = tx.Commit()
@@ -291,7 +291,7 @@ func addEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMa
 		log.Warning("addEnvironmentHandler> Cannot update project last modified date: %s\n", errDate)
 		return errDate
 	}
-	projectData.LastModified = lastModified.Unix()
+	projectData.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("addEnvironmentHandler> Cannot commit transaction: %s\n", err)
@@ -344,7 +344,7 @@ func deleteEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 		log.Warning("deleteEnvironmentHandler> Cannot update project last modified date: %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("deleteEnvironmentHandler> Cannot commit transaction: %s\n", err)
@@ -451,7 +451,7 @@ func updateEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 		log.Warning("updateEnvironmentHandler> Cannot update project last modified date: %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("updateEnvironmentHandler> Cannot commit transaction: %s\n", err)
@@ -557,7 +557,7 @@ func cloneEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 		log.Warning("cloneEnvironmentHandler> Cannot update project last modified date: %s\n", errDate)
 		return errDate
 	}
-	p.LastModified = lastModified.Unix()
+	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		return err
