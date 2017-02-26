@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/fsamin/go-dump"
+	"github.com/go-gorp/gorp"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ovh/cds/engine/api/application"
@@ -14,9 +15,16 @@ import (
 	"github.com/ovh/cds/sdk"
 )
 
+func deleteAllInvokerType(t *testing.T, db gorp.SqlExecutor) {
+	_, err := db.Exec("delete from pipeline_invoker")
+	test.NoError(t, err)
+	_, err = db.Exec("delete from pipeline_invoker_type")
+	test.NoError(t, err)
+}
+
 func TestInsertInvokerType(t *testing.T) {
 	db := test.SetupPG(t)
-
+	deleteAllInvokerType(t, db)
 	pit := sdk.PipelineInvokerType{
 		Author:      "author",
 		Description: "description",
@@ -37,6 +45,7 @@ func TestInsertInvokerType(t *testing.T) {
 
 func TestUpdateInvokerType(t *testing.T) {
 	db := test.SetupPG(t)
+	deleteAllInvokerType(t, db)
 
 	pit := sdk.PipelineInvokerType{
 		Author:      "author",
@@ -70,6 +79,8 @@ func TestUpdateInvokerType(t *testing.T) {
 
 func TestDeleteInvokerType(t *testing.T) {
 	db := test.SetupPG(t)
+	deleteAllInvokerType(t, db)
+
 	pit := sdk.PipelineInvokerType{
 		Author:      "author",
 		Description: "description",
@@ -97,6 +108,7 @@ func TestLoadInvokerType(t *testing.T) {
 
 func TestLoadAllInvokerTypes(t *testing.T) {
 	db := test.SetupPG(t)
+	deleteAllInvokerType(t, db)
 
 	pit := sdk.PipelineInvokerType{
 		Author:      "author",
@@ -133,6 +145,8 @@ func TestLoadAllInvokerTypes(t *testing.T) {
 
 func TestInsert(t *testing.T) {
 	db := test.SetupPG(t, bootstrap.InitiliazeDB)
+	deleteAllInvokerType(t, db)
+
 	pit := sdk.PipelineInvokerType{
 		Author:      "author",
 		Description: "description",
@@ -145,7 +159,7 @@ func TestInsert(t *testing.T) {
 	}
 	test.NoError(t, InsertInvokerType(db, &pit))
 
-	proj := assets.InsertTestProject(t, db, assets.RandomString(t, 4), assets.RandomString(t, 10))
+	proj := assets.InsertTestProject(t, db, assets.RandomString(t, 10), assets.RandomString(t, 10))
 	app := &sdk.Application{
 		Name:       "app",
 		ProjectKey: proj.Key,
