@@ -4,10 +4,12 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/go-gorp/gorp"
 
@@ -68,32 +70,34 @@ func SetupPG(t *testing.T, bootstrapFunc ...bootstrap) *gorp.DbMap {
 	}
 	dsn := fmt.Sprintf("user=%s password=%s dbname=%s host=%s port=%s sslmode=%s connect_timeout=10 statement_timeout=5000", dbUser, dbPassword, dbName, dbHost, dbPort, dbSSLMode)
 
-	db, err := sql.Open(DBDriver, dsn)
-	if err != nil {
-		t.Fatalf("Cannot open database: %s\n", err)
-		return nil
+	if database.DB() == nil {
+		db, err := sql.Open(DBDriver, dsn)
+		if err != nil {
+			t.Fatalf("Cannot open database: %s\n", err)
+			return nil
+		}
+
+		if err = db.Ping(); err != nil {
+			t.Fatalf("Cannot ping database: %s\n", err)
+			return nil
+		}
+		database.Set(db)
+
+		db.SetMaxOpenConns(100)
+		db.SetMaxIdleConns(20)
+
+		// Gracefully shutdown sql connections
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		signal.Notify(c, syscall.SIGTERM)
+		signal.Notify(c, syscall.SIGKILL)
+		go func() {
+			<-c
+			log.Warning("Cleanup SQL connections\n")
+			db.Close()
+			os.Exit(0)
+		}()
 	}
-
-	if err = db.Ping(); err != nil {
-		t.Fatalf("Cannot ping database: %s\n", err)
-		return nil
-	}
-	database.Set(db)
-
-	db.SetMaxOpenConns(100)
-	db.SetMaxIdleConns(20)
-
-	// Gracefully shutdown sql connections
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	signal.Notify(c, syscall.SIGTERM)
-	signal.Notify(c, syscall.SIGKILL)
-	go func() {
-		<-c
-		log.Warning("Cleanup SQL connections\n")
-		db.Close()
-		os.Exit(0)
-	}()
 
 	for _, f := range bootstrapFunc {
 		if err := f(database.GetDBMap); err != nil {
@@ -101,10 +105,21 @@ func SetupPG(t *testing.T, bootstrapFunc ...bootstrap) *gorp.DbMap {
 		}
 	}
 
-	dbmap := database.DBMap(db)
+	dbmap := database.DBMap(database.DB())
 	if os.Getenv("GORP_TRACE") != "" {
 		dbmap.TraceOn("[GORP]     Query>", testLogger{t})
 	}
 
 	return dbmap
+}
+
+// RandomString have to be used only for tests
+func RandomString(t *testing.T, strlen int) string {
+	rand.Seed(time.Now().UTC().UnixNano())
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+	result := make([]byte, strlen)
+	for i := 0; i < strlen; i++ {
+		result[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(result)
 }

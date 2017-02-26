@@ -15,10 +15,10 @@ import (
 )
 
 //Import is able to create a new application and all its components
-func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repomanager *sdk.RepositoriesManager, user *sdk.User, msgChan chan<- msg.Message) error {
+func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repomanager *sdk.RepositoriesManager, u *sdk.User, msgChan chan<- msg.Message) error {
 	//Save application in database
-	if err := InsertApplication(db, proj, app); err != nil {
-		return err
+	if err := Insert(db, proj, app); err != nil {
+		return sdk.WrapError(err, "application.Import")
 	}
 
 	if msgChan != nil {
@@ -33,6 +33,14 @@ func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repoma
 		app.ApplicationGroups = proj.ProjectGroups
 	}
 
+	if err := importVariables(db, proj, app, u, msgChan); err != nil {
+		return err
+	}
+
+	if err := ImportPipelines(db, proj, app, u, msgChan); err != nil {
+		return err
+	}
+
 	//Insert group permission on application
 	for i := range app.ApplicationGroups {
 		//Load the group by name
@@ -41,20 +49,12 @@ func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repoma
 			return err
 		}
 		log.Debug("application.Import> Insert group %d in application", g.ID)
-		if err := group.InsertGroupInApplication(db, app.ID, g.ID, app.ApplicationGroups[i].Permission); err != nil {
+		if err := AddGroup(db, proj, app, app.ApplicationGroups[i]); err != nil {
 			return err
 		}
 		if msgChan != nil {
 			msgChan <- msg.New(msg.AppGroupSetPermission, g.Name, app.Name)
 		}
-	}
-
-	if err := importVariables(db, proj, app, user, msgChan); err != nil {
-		return err
-	}
-
-	if err := ImportPipelines(db, proj, app, msgChan); err != nil {
-		return err
 	}
 
 	//Set repositories manager
@@ -76,23 +76,22 @@ func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repoma
 }
 
 //importVariables is able to create variable on an existing application
-func importVariables(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, user *sdk.User, msgChan chan<- msg.Message) error {
-
+func importVariables(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, u *sdk.User, msgChan chan<- msg.Message) error {
 	for _, newVar := range app.Variable {
 		var errCreate error
 		switch newVar.Type {
 		case sdk.KeyVariable:
-			errCreate = AddKeyPairToApplication(db, app, newVar.Name)
+			errCreate = AddKeyPairToApplication(db, app, newVar.Name, u)
 			break
 		default:
-			errCreate = InsertVariable(db, app, newVar)
+			errCreate = InsertVariable(db, app, newVar, u)
 			break
 		}
 		if errCreate != nil {
 			log.Warning("importVariables> Cannot add variable %s in application %s:  %s\n", newVar.Name, app.Name, errCreate)
 			return errCreate
 		}
-		if err := CreateAudit(db, newVar.Name, app, user); err != nil {
+		if err := CreateAudit(db, newVar.Name, app, u); err != nil {
 			log.Warning("importVariabitles> Cannot create variable audit for application %s:  %s\n", app.Name, err)
 			return err
 		}
@@ -106,7 +105,7 @@ func importVariables(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 }
 
 //ImportPipelines is able to create pipelines on an existing application
-func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, msgChan chan<- msg.Message) error {
+func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, u *sdk.User, msgChan chan<- msg.Message) error {
 	//Import pipelines
 	for i := range app.Pipelines {
 		//Import pipeline
@@ -124,7 +123,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 		//Attach pipeline
 		if !attached {
 			log.Debug("application.Import> Attach pipeline %s", app.Pipelines[i].Pipeline.Name)
-			if err := AttachPipeline(db, app.ID, app.Pipelines[i].Pipeline.ID); err != nil {
+			if _, err := AttachPipeline(db, app.ID, app.Pipelines[i].Pipeline.ID); err != nil {
 				return err
 			}
 			if msgChan != nil {
@@ -147,7 +146,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 				log.Debug("ImportPipelines> current app")
 			} else {
 				log.Debug("Load t.SrcApplication.Name:%s", t.SrcApplication.Name)
-				srcApp, err := LoadApplicationByName(db, proj.Key, t.SrcApplication.Name)
+				srcApp, err := LoadByName(db, proj.Key, t.SrcApplication.Name, u, LoadOptions.Default)
 				if err != nil {
 					return err
 				}
@@ -172,7 +171,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 			if t.DestApplication.Name == "" {
 				t.DestApplication = *app
 			} else {
-				dest, err := LoadApplicationByName(db, proj.Key, t.DestApplication.Name)
+				dest, err := LoadByName(db, proj.Key, t.DestApplication.Name, u, LoadOptions.Default)
 				if err != nil {
 					return err
 				}

@@ -38,12 +38,12 @@ func TestExecuterRun(t *testing.T) {
 		Name: "TEST_APP",
 	}
 	t.Logf("Insert Application %s for Project %s", app.Name, proj.Name)
-	if err := application.InsertApplication(db, proj, app); err != nil {
+	if err := application.Insert(db, proj, app); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Logf("Attach Pipeline %s on Application %s", pip.Name, app.Name)
-	if err := application.AttachPipeline(db, app.ID, pip.ID); err != nil {
+	if _, err := application.AttachPipeline(db, app.ID, pip.ID); err != nil {
 		t.Fatal(err)
 	}
 

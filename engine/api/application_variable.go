@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 
@@ -46,13 +44,13 @@ func restoreAuditHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap,
 		return sdk.ErrInvalidID
 	}
 
-	p, err := project.Load(db, key, c.User)
+	p, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("restoreAuditHandler: Cannot load %s: %s\n", key, err)
 		return err
 	}
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("restoreAuditHandler: Cannot load application %s : %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -92,7 +90,7 @@ func restoreAuditHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap,
 			}
 			v.Value = string(value)
 		}
-		err := application.InsertVariable(tx, app, v)
+		err := application.InsertVariable(tx, app, v, c.User)
 		if err != nil {
 			log.Warning("restoreAuditHandler: Cannot insert variable %s for application %s:  %s\n", v.Name, appName, err)
 			return err
@@ -126,7 +124,7 @@ func getVariableInApplicationHandler(w http.ResponseWriter, r *http.Request, db 
 	appName := vars["permApplicationName"]
 	varName := vars["name"]
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User)
 	if err != nil {
 		log.Warning("getVariableInApplicationHandler: Cannot load application %s: %s\n", appName, err)
 		return err
@@ -162,7 +160,7 @@ func deleteVariableFromApplicationHandler(w http.ResponseWriter, r *http.Request
 	appName := vars["permApplicationName"]
 	varName := vars["name"]
 
-	p, err := project.Load(db, key, c.User)
+	p, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("deleteVariableInApplicationHandler: Cannot load project: %s\n", err)
 		return err
@@ -176,7 +174,7 @@ func deleteVariableFromApplicationHandler(w http.ResponseWriter, r *http.Request
 
 	p.Environments = envs
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("deleteVariableInApplicationHandler: Cannot load application: %s\n", err)
 		return err
@@ -195,7 +193,7 @@ func deleteVariableFromApplicationHandler(w http.ResponseWriter, r *http.Request
 		return err
 	}
 
-	err = application.DeleteVariable(tx, app, varName)
+	err = application.DeleteVariable(tx, app, varName, c.User)
 	if err != nil {
 		log.Warning("deleteVariableFromApplicationHandler: Cannot delete %s: %s\n", varName, err)
 		return err
@@ -229,33 +227,18 @@ func updateVariablesInApplicationHandler(w http.ResponseWriter, r *http.Request,
 	key := vars["key"]
 	appName := vars["permApplicationName"]
 
-	p, err := project.Load(db, key, c.User)
+	p, err := project.Load(db, key, c.User, project.LoadOptions.Default, project.LoadOptions.WithEnvironments)
 	if err != nil {
 		log.Warning("updateVariablesInApplicationHandler: Cannot load %s: %s\n", key, err)
 		return err
 	}
 
-	p.Environments, err = environment.LoadEnvironments(db, key, true, c.User)
-	if err != nil {
-		log.Warning("updateVariableInApplicationHandler: Cannot load environments: %s\n", key, err)
+	var varsToUpdate []sdk.Variable
+	if err := UnmarshalBody(r, &varsToUpdate); err != nil {
 		return err
 	}
 
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updateVariablesInApplicationHandler: Cannot read body: %s\n", err)
-		return sdk.ErrWrongRequest
-	}
-
-	var varsToUpdate []sdk.Variable
-	err = json.Unmarshal(data, &varsToUpdate)
-	if err != nil {
-		log.Warning("updateVariablesInApplicationHandler: Cannot unmarshal body : %s\n", err)
-		return sdk.ErrWrongRequest
-	}
-
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("updateVariablesInApplicationHandler: Cannot load application %s : %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -298,14 +281,14 @@ func updateVariablesInApplicationHandler(w http.ResponseWriter, r *http.Request,
 				}
 			}
 
-			if err := application.InsertVariable(tx, app, v); err != nil {
+			if err := application.InsertVariable(tx, app, v, c.User); err != nil {
 				log.Warning("updateVariablesInApplicationHandler: Cannot insert variable %s for application %s:  %s\n", v.Name, appName, err)
 				return err
 			}
 			break
 		case sdk.KeyVariable:
 			if v.Value == "" {
-				if err := application.AddKeyPairToApplication(tx, app, v.Name); err != nil {
+				if err := application.AddKeyPairToApplication(tx, app, v.Name, c.User); err != nil {
 					log.Warning("updateVariablesInApplicationHandler> cannot generate keypair: %s\n", err)
 					return err
 				}
@@ -315,14 +298,14 @@ func updateVariablesInApplicationHandler(w http.ResponseWriter, r *http.Request,
 						v.Value = p.Value
 					}
 				}
-				if err := application.InsertVariable(tx, app, v); err != nil {
+				if err := application.InsertVariable(tx, app, v, c.User); err != nil {
 					log.Warning("updateVariablesInApplication: Cannot insert variable %s in project %s: %s\n", v.Name, p.Key, err)
 					return err
 				}
 			}
 			break
 		default:
-			if err := application.InsertVariable(tx, app, v); err != nil {
+			if err := application.InsertVariable(tx, app, v, c.User); err != nil {
 				log.Warning("updateVariablesInApplicationHandler: Cannot insert variable %s for application %s:  %s\n", v.Name, appName, err)
 				return err
 			}
@@ -354,36 +337,21 @@ func updateVariableInApplicationHandler(w http.ResponseWriter, r *http.Request, 
 	appName := vars["permApplicationName"]
 	varName := vars["name"]
 
-	p, err := project.Load(db, key, c.User)
+	p, err := project.Load(db, key, c.User, project.LoadOptions.Default, project.LoadOptions.WithEnvironments)
 	if err != nil {
 		log.Warning("updateVariableInApplicationHandler: Cannot load %s: %s\n", key, err)
 		return err
 	}
 
-	p.Environments, err = environment.LoadEnvironments(db, key, true, c.User)
-	if err != nil {
-		log.Warning("updateVariableInApplicationHandler: Cannot load environments: %s\n", key, err)
-		return err
-	}
-
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updateVariableInApplicationHandler: Cannot read body: %s\n", err)
-		return sdk.ErrWrongRequest
-	}
-
 	var newVar sdk.Variable
-	err = json.Unmarshal(data, &newVar)
-	if err != nil {
-		log.Warning("updateVariableInApplicationHandler: Cannot unmarshal body : %s\n", err)
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &newVar); err != nil {
+		return err
 	}
 	if newVar.Name != varName {
 		return sdk.ErrWrongRequest
 	}
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("updateVariableInApplicationHandler: Cannot load application: %s\n", err)
 		return err
@@ -402,7 +370,7 @@ func updateVariableInApplicationHandler(w http.ResponseWriter, r *http.Request, 
 		return err
 	}
 
-	err = application.UpdateVariable(tx, app, newVar)
+	err = application.UpdateVariable(tx, app, newVar, c.User)
 	if err != nil {
 		log.Warning("updateVariableInApplicationHandler: Cannot update variable %s for application %s:  %s\n", varName, appName, err)
 		return err
@@ -442,34 +410,22 @@ func addVariableInApplicationHandler(w http.ResponseWriter, r *http.Request, db 
 	appName := vars["permApplicationName"]
 	varName := vars["name"]
 
-	p, err := project.Load(db, key, c.User)
+	p, err := project.Load(db, key, c.User, project.LoadOptions.Default, project.LoadOptions.WithEnvironments)
 	if err != nil {
 		log.Warning("addVariableInApplicationHandler: Cannot load %s: %s\n", key, err)
 		return err
 	}
 
-	p.Environments, err = environment.LoadEnvironments(db, key, true, c.User)
-	if err != nil {
-		log.Warning("addVariableInApplicationHandler: Cannot load environments: %s\n", key, err)
-		return err
-	}
-
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-	}
-
 	var newVar sdk.Variable
-	if err := json.Unmarshal(data, &newVar); err != nil {
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &newVar); err != nil {
+		return err
 	}
 
 	if newVar.Name != varName {
 		return sdk.ErrWrongRequest
 	}
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("addVariableInApplicationHandler: Cannot load application %s :  %s\n", appName, err)
 		return err
@@ -489,10 +445,10 @@ func addVariableInApplicationHandler(w http.ResponseWriter, r *http.Request, db 
 
 	switch newVar.Type {
 	case sdk.KeyVariable:
-		err = application.AddKeyPairToApplication(tx, app, newVar.Name)
+		err = application.AddKeyPairToApplication(tx, app, newVar.Name, c.User)
 		break
 	default:
-		err = application.InsertVariable(tx, app, newVar)
+		err = application.InsertVariable(tx, app, newVar, c.User)
 		break
 	}
 	if err != nil {

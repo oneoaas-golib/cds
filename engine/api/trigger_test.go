@@ -59,15 +59,15 @@ func TestAddTriggerHandler(t *testing.T) {
 	app := &sdk.Application{
 		Name: applicationName,
 	}
-	err = application.InsertApplication(db, proj, app)
+	err = application.Insert(db, proj, app)
 	test.NoError(t, err)
 
 	//6. Attach pipeline 1
-	err = application.AttachPipeline(db, app.ID, pip1.ID)
+	_, err = application.AttachPipeline(db, app.ID, pip1.ID)
 	test.NoError(t, err)
 
 	//7. Attach pipeline 2
-	err = application.AttachPipeline(db, app.ID, pip2.ID)
+	_, err = application.AttachPipeline(db, app.ID, pip2.ID)
 	test.NoError(t, err)
 
 	// 8. Prepare the request
@@ -146,15 +146,15 @@ func TestUpdateTriggerHandler(t *testing.T) {
 	app := &sdk.Application{
 		Name: applicationName,
 	}
-	err = application.InsertApplication(db, proj, app)
+	err = application.Insert(db, proj, app)
 	test.NoError(t, err)
 
 	//6. Attach pipeline 1
-	err = application.AttachPipeline(db, app.ID, pip1.ID)
+	_, err = application.AttachPipeline(db, app.ID, pip1.ID)
 	test.NoError(t, err)
 
 	//7. Attach pipeline 2
-	err = application.AttachPipeline(db, app.ID, pip2.ID)
+	_, err = application.AttachPipeline(db, app.ID, pip2.ID)
 	test.NoError(t, err)
 
 	// 8. InsertTrigger
@@ -238,15 +238,15 @@ func TestRemoveTriggerHandler(t *testing.T) {
 	app := &sdk.Application{
 		Name: applicationName,
 	}
-	err = application.InsertApplication(db, proj, app)
+	err = application.Insert(db, proj, app)
 	test.NoError(t, err)
 
 	//6. Attach pipeline 1
-	err = application.AttachPipeline(db, app.ID, pip1.ID)
+	_, err = application.AttachPipeline(db, app.ID, pip1.ID)
 	test.NoError(t, err)
 
 	//7. Attach pipeline 2
-	err = application.AttachPipeline(db, app.ID, pip2.ID)
+	_, err = application.AttachPipeline(db, app.ID, pip2.ID)
 	test.NoError(t, err)
 
 	// 8. InsertTrigger

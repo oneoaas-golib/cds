@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -98,6 +99,10 @@ func postFile(t *testing.T,
 }
 
 func downloadFile(t *testing.T, name, url string) (string, func(), error) {
+	if runtime.GOOS != "linux" {
+		t.SkipNow()
+	}
+
 	t.Logf("Downloading file %s", url)
 
 	resp, err := http.Get(url)

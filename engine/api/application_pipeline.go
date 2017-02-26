@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"io/ioutil"
 	"net/http"
 
@@ -21,14 +20,14 @@ import (
 	"github.com/ovh/cds/sdk"
 )
 
+// Deprecated
 func attachPipelineToApplicationHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
-
 	vars := mux.Vars(r)
 	key := vars["key"]
 	appName := vars["permApplicationName"]
 	pipelineName := vars["permPipelineKey"]
 
-	project, err := project.Load(db, key, c.User)
+	proj, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("addPipelineInApplicationHandler: Cannot load project: %s: %s\n", key, err)
 		return err
@@ -40,22 +39,96 @@ func attachPipelineToApplicationHandler(w http.ResponseWriter, r *http.Request, 
 		return sdk.ErrNotFound
 	}
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("addPipelineInApplicationHandler: Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrNotFound
 	}
 
-	err = application.AttachPipeline(db, app.ID, pipeline.ID)
-	if err != nil {
+	if _, err := application.AttachPipeline(db, app.ID, pipeline.ID); err != nil {
 		log.Warning("addPipelineInApplicationHandler: Cannot attach pipeline %s to application %s:  %s\n", pipelineName, appName, err)
 		return err
 	}
 
-	err = sanity.CheckPipeline(db, project, pipeline)
-	if err != nil {
+	if err := sanity.CheckPipeline(db, proj, pipeline); err != nil {
 		log.Warning("addPipelineInApplicationHandler: Cannot check pipeline sanity: %s\n", err)
 		return err
+	}
+
+	k := cache.Key("application", key, "*"+appName+"*")
+	cache.DeleteAll(k)
+
+	return WriteJSON(w, r, app, http.StatusOK)
+}
+
+func attachPipelinesToApplicationHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
+	vars := mux.Vars(r)
+	key := vars["key"]
+	appName := vars["permApplicationName"]
+
+	var pipelines []string
+	if err := UnmarshalBody(r, &pipelines); err != nil {
+		return err
+	}
+
+	project, err := project.Load(db, key, c.User, project.LoadOptions.Default)
+	if err != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot load project: %s: %s\n", key, err)
+		return err
+	}
+
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
+	if err != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot load application %s: %s\n", appName, err)
+		return err
+	}
+
+	tx, errBegin := db.Begin()
+	if errBegin != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot begin transaction: %s\n", errBegin)
+		return errBegin
+	}
+
+	for _, pipName := range pipelines {
+		pipeline, err := pipeline.LoadPipeline(tx, key, pipName, true)
+		if err != nil {
+			log.Warning("attachPipelinesToApplicationHandler: Cannot load pipeline %s: %s\n", pipName, err)
+			return err
+		}
+
+		id, errA := application.AttachPipeline(tx, app.ID, pipeline.ID)
+		if errA != nil {
+			log.Warning("attachPipelinesToApplicationHandler: Cannot attach pipeline %s to application %s:  %s\n", pipName, appName, errA)
+			return errA
+		}
+
+		app.Pipelines = append(app.Pipelines, sdk.ApplicationPipeline{
+			Pipeline: *pipeline,
+			ID:       id,
+		})
+
+	}
+
+	if err := application.UpdateLastModified(tx, app, c.User); err != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot update application last modified date: %s\n", err)
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot commit transaction: %s\n", err)
+		return err
+	}
+
+	if err := sanity.CheckProjectPipelines(db, project); err != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot check project sanity: %s\n", err)
+		return err
+	}
+
+	var errW error
+	app.Workflows, errW = application.LoadCDTree(db, project.Key, app.Name, c.User)
+	if errW != nil {
+		log.Warning("attachPipelinesToApplicationHandler: Cannot load application workflow: %s\n", errW)
+		return errW
 	}
 
 	k := cache.Key("application", key, "*"+appName+"*")
@@ -69,21 +142,12 @@ func updatePipelinesToApplicationHandler(w http.ResponseWriter, r *http.Request,
 	key := vars["key"]
 	appName := vars["permApplicationName"]
 
-	// Get args in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updatePipelinesToApplicationHandler>Cannot read body: %s\n", err)
-		return sdk.ErrUnknownError
-	}
-
 	var appPipelines []sdk.ApplicationPipeline
-	err = json.Unmarshal([]byte(data), &appPipelines)
-	if err != nil {
-		log.Warning("updatePipelinesToApplicationHandler: Cannot unmarshal body: %s\n", err)
-		return sdk.ErrUnknownError
+	if err := UnmarshalBody(r, &appPipelines); err != nil {
+		return err
 	}
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("updatePipelinesToApplicationHandler: Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -97,7 +161,7 @@ func updatePipelinesToApplicationHandler(w http.ResponseWriter, r *http.Request,
 	defer tx.Rollback()
 
 	for _, appPip := range appPipelines {
-		err = application.UpdatePipelineApplication(tx, app, appPip.Pipeline.ID, appPip.Parameters)
+		err = application.UpdatePipelineApplication(tx, app, appPip.Pipeline.ID, appPip.Parameters, c.User)
 		if err != nil {
 			log.Warning("updatePipelinesToApplicationHandler: Cannot update  application pipeline  %s/%s parameters: %s\n", appName, appPip.Pipeline.Name, err)
 			return sdk.ErrUnknownError
@@ -115,6 +179,7 @@ func updatePipelinesToApplicationHandler(w http.ResponseWriter, r *http.Request,
 	return WriteJSON(w, r, app, http.StatusOK)
 }
 
+// DEPRECATED
 func updatePipelineToApplicationHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
 	vars := mux.Vars(r)
 	key := vars["key"]
@@ -127,7 +192,7 @@ func updatePipelineToApplicationHandler(w http.ResponseWriter, r *http.Request, 
 		return sdk.ErrNotFound
 	}
 
-	app, err := application.LoadApplicationByName(db, key, appName)
+	app, err := application.LoadByName(db, key, appName, c.User)
 	if err != nil {
 		log.Warning("updatePipelineToApplicationHandler: Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrNotFound
@@ -140,7 +205,7 @@ func updatePipelineToApplicationHandler(w http.ResponseWriter, r *http.Request, 
 		return sdk.ErrWrongRequest
 	}
 
-	err = application.UpdatePipelineApplicationString(db, app, pipeline.ID, string(data))
+	err = application.UpdatePipelineApplicationString(db, app, pipeline.ID, string(data), c.User)
 	if err != nil {
 		log.Warning("updatePipelineToApplicationHandler: Cannot update application %s pipeline %s parameters %s:  %s\n", appName, pipelineName, err)
 		return err
@@ -172,21 +237,30 @@ func removePipelineFromApplicationHandler(w http.ResponseWriter, r *http.Request
 	appName := vars["permApplicationName"]
 	pipelineName := vars["permPipelineKey"]
 
-	tx, err := db.Begin()
-	if err != nil {
-		log.Warning("removePipelineFromApplicationHandler> Cannot start tx: %s\n", err)
-		return err
+	a, errA := application.LoadByName(db, key, appName, c.User)
+	if errA != nil {
+		log.Warning("removePipelineFromApplicationHandler> Cannot load application: %s\n", errA)
+		return errA
+	}
+
+	tx, errB := db.Begin()
+	if errB != nil {
+		log.Warning("removePipelineFromApplicationHandler> Cannot start tx: %s\n", errB)
+		return errB
 	}
 	defer tx.Rollback()
 
-	err = application.RemovePipeline(tx, key, appName, pipelineName)
-	if err != nil {
+	if err := application.RemovePipeline(tx, key, appName, pipelineName); err != nil {
 		log.Warning("removePipelineFromApplicationHandler: Cannot detach pipeline %s from %s: %s\n", pipelineName, appName, err)
 		return err
 	}
 
-	err = tx.Commit()
-	if err != nil {
+	if err := application.UpdateLastModified(tx, a, c.User); err != nil {
+		log.Warning("removePipelineFromApplicationHandler> Cannot update application last modified date: %s\n", err)
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
 		log.Warning("removePipelineFromApplicationHandler> Cannot commit tx: %s\n", err)
 		return err
 	}
@@ -194,7 +268,24 @@ func removePipelineFromApplicationHandler(w http.ResponseWriter, r *http.Request
 	k := cache.Key("application", key, "*"+appName+"*")
 	cache.DeleteAll(k)
 
-	return nil
+	var errW error
+	a.Workflows, errW = application.LoadCDTree(db, key, a.Name, c.User)
+	if errW != nil {
+		log.Warning("removePipelineFromApplicationHandler> Cannot load workflow: %s\n", errW)
+		return errW
+	}
+
+	// Remove pipeline from struct
+	var indexPipeline int
+	for i, appPip := range a.Pipelines {
+		if appPip.Pipeline.Name == pipelineName {
+			indexPipeline = i
+			break
+		}
+	}
+	a.Pipelines = append(a.Pipelines[:indexPipeline], a.Pipelines[indexPipeline+1:]...)
+
+	return WriteJSON(w, r, a, http.StatusOK)
 }
 
 func getUserNotificationTypeHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
@@ -221,7 +312,7 @@ func getUserNotificationApplicationPipelineHandler(w http.ResponseWriter, r *htt
 	envName := r.Form.Get("envName")
 
 	//Load application
-	application, err := application.LoadApplicationByName(db, key, appName)
+	application, err := application.LoadByName(db, key, appName, c.User)
 	if err != nil {
 		log.Warning("getUserNotificationApplicationPipelineHandler> Cannot load application %s for project %s from db: %s\n", appName, key, err)
 		return err
@@ -277,7 +368,7 @@ func deleteUserNotificationApplicationPipelineHandler(w http.ResponseWriter, r *
 	envName := r.Form.Get("envName")
 
 	///Load application
-	applicationData, err := application.LoadApplicationByName(db, key, appName)
+	applicationData, err := application.LoadByName(db, key, appName, c.User)
 	if err != nil {
 		log.Warning("deleteUserNotificationApplicationPipelineHandler> Cannot load application %s for project %s from db: %s\n", appName, key, err)
 		return err
@@ -320,7 +411,7 @@ func deleteUserNotificationApplicationPipelineHandler(w http.ResponseWriter, r *
 		return err
 	}
 
-	err = application.UpdateLastModified(tx, applicationData)
+	err = application.UpdateLastModified(tx, applicationData, c.User)
 	if err != nil {
 		log.Warning("deleteUserNotificationApplicationPipelineHandler> cannot update application last_modified date: %s\n", err)
 		return err
@@ -351,17 +442,11 @@ func addNotificationsHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 	appName := vars["permApplicationName"]
 
 	var notifs []sdk.UserNotification
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addNotificationsHandler: Cannot read body: %s\n", err)
-		return sdk.ErrWrongRequest
-	}
-	if err := json.Unmarshal(data, &notifs); err != nil {
-		log.Warning("addNotificationsHandler: Cannot unmarshal request: %s\n", err)
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &notifs); err != nil {
+		return err
 	}
 
-	app, errApp := application.LoadApplicationByName(db, key, appName)
+	app, errApp := application.LoadByName(db, key, appName, c.User, application.LoadOptions.WithPipelines)
 	if errApp != nil {
 		log.Warning("addNotificationsHandler: Cannot load application: %s\n", errApp)
 		return sdk.ErrWrongRequest
@@ -403,7 +488,7 @@ func addNotificationsHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 		}
 	}
 
-	if err := application.UpdateLastModified(tx, app); err != nil {
+	if err := application.UpdateLastModified(tx, app, c.User); err != nil {
 		log.Warning("addNotificationsHandler> cannot update application last_modified date: %s\n", err)
 		return err
 
@@ -431,11 +516,10 @@ func updateUserNotificationApplicationPipelineHandler(w http.ResponseWriter, r *
 	pipelineName := vars["permPipelineKey"]
 
 	///Load application
-	applicationData, err := application.LoadApplicationByName(db, key, appName)
+	applicationData, err := application.LoadByName(db, key, appName, c.User)
 	if err != nil {
 		log.Warning("updateUserNotificationApplicationPipelineHandler> Cannot load application %s for project %s from db: %s\n", appName, key, err)
 		return err
-
 	}
 
 	//Load pipeline
@@ -447,13 +531,9 @@ func updateUserNotificationApplicationPipelineHandler(w http.ResponseWriter, r *
 	}
 
 	//Parse notification settings
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-	}
 	notifs := &sdk.UserNotification{}
-	if err := json.Unmarshal(data, notifs); err != nil {
-		return sdk.ErrParseUserNotification
+	if err := UnmarshalBody(r, &notifs); err != nil {
+		return err
 	}
 
 	//Load environment
@@ -481,7 +561,7 @@ func updateUserNotificationApplicationPipelineHandler(w http.ResponseWriter, r *
 
 	}
 
-	err = application.UpdateLastModified(tx, applicationData)
+	err = application.UpdateLastModified(tx, applicationData, c.User)
 	if err != nil {
 		log.Warning("updateUserNotificationApplicationPipelineHandler> cannot update application last_modified date: %s\n", err)
 		return err

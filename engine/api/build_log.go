@@ -2,9 +2,7 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 
@@ -66,7 +64,7 @@ func getStepBuildLogsHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 	}
 
 	// Check that application exists
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("getStepBuildLogsHandler> Cannot load application %s: %s\n", appName, err)
 		return err
@@ -148,7 +146,7 @@ func getBuildLogsHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap,
 	}
 
 	// Check that application exists
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("getBuildLogsHandler> Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -222,7 +220,7 @@ func getPipelineBuildJobLogsHandler(w http.ResponseWriter, r *http.Request, db *
 		return err
 	}
 
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("getPipelineBuildJobLogsHandler> Cannot load application %s: %s\n", appName, err)
 		return err
@@ -275,28 +273,15 @@ func getPipelineBuildJobLogsHandler(w http.ResponseWriter, r *http.Request, db *
 }
 
 func addBuildLogHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
-
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addBuildLogHandler> Cannot read body: %s\n", err)
-		return err
-
-	}
-
-	// Unmarshal into results
 	var logs sdk.Log
-
-	if err := json.Unmarshal([]byte(data), &logs); err != nil {
-		log.Warning("addBuildLogHandler> Cannot unmarshal Result: %s\n", err)
+	if err := UnmarshalBody(r, &logs); err != nil {
 		return err
-
 	}
 
 	existingLogs, errLog := pipeline.LoadStepLogs(db, logs.PipelineBuildJobID, logs.StepOrder)
 	if errLog != nil && errLog != sql.ErrNoRows {
-		log.Warning("addBuildLogHandler> Cannot load existing logs: %s\n", err)
-		return err
+		log.Warning("addBuildLogHandler> Cannot load existing logs: %s\n", errLog)
+		return errLog
 	}
 
 	if existingLogs == nil {

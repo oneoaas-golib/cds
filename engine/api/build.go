@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-gorp/gorp"
 	"github.com/gorilla/mux"
+	"github.com/runabove/venom"
 
 	"github.com/ovh/cds/engine/api/application"
 	"github.com/ovh/cds/engine/api/artifact"
@@ -39,16 +40,9 @@ func updateStepStatusHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 		return errJob
 	}
 
-	// Get body
-	data, errR := ioutil.ReadAll(r.Body)
-	if errR != nil {
-		log.Warning("updateStepStatusHandler> Cannot read body: %s\n", errR)
-		return sdk.ErrWrongRequest
-	}
 	var step sdk.StepStatus
-	if err := json.Unmarshal(data, &step); err != nil {
-		log.Warning("updateStepStatusHandler> Cannot unmarshall body: %s\n", err)
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &step); err != nil {
+		return err
 	}
 
 	found := false
@@ -99,7 +93,7 @@ func getPipelineBuildTriggeredHandler(w http.ResponseWriter, r *http.Request, db
 	}
 
 	// Load Application
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("getPipelineBuildTriggeredHandler> Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -140,7 +134,7 @@ func deleteBuildHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, 
 		return sdk.ErrPipelineNotFound
 	}
 
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("deleteBuildHandler> Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -213,7 +207,7 @@ func getBuildStateHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap
 		return sdk.ErrPipelineNotFound
 	}
 
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("getBuildStateHandler> Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrApplicationNotFound
@@ -299,19 +293,10 @@ func addQueueResultHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMa
 		return sdk.ErrNotFound
 	}
 
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addQueueResultHandler> Cannot read body: %s\n", err)
-		return sdk.ErrWrongRequest
-	}
-
 	// Unmarshal into results
 	var res sdk.Result
-	err = json.Unmarshal([]byte(data), &res)
-	if err != nil {
-		log.Warning("addQueueResultHandler> Cannot unmarshal Result: %s\n", err)
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &res); err != nil {
+		return err
 	}
 
 	tx, err := db.Begin()
@@ -493,7 +478,7 @@ func loadActionBuildSecrets(db *gorp.DbMap, pbJobID int64) ([]sdk.Variable, erro
 }
 
 func getQueueHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
-	if c.Worker.ID != "" {
+	if c.Worker != nil && c.Worker.ID != "" {
 		// Load calling worker
 		caller, errW := worker.LoadWorker(db, c.Worker.ID)
 		if errW != nil {
@@ -584,7 +569,7 @@ func addBuildVariableHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 	}
 
 	// Check that application exists
-	a, errLA := application.LoadApplicationByName(db, projectKey, appName)
+	a, errLA := application.LoadByName(db, projectKey, appName, c.User)
 	if errLA != nil {
 		log.Warning("addBuildVariableHandler> Cannot load application %s: %s\n", appName, errLA)
 		return errLA
@@ -604,17 +589,9 @@ func addBuildVariableHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 		return errPB
 	}
 
-	// Get body
-	data, errR := ioutil.ReadAll(r.Body)
-	if errR != nil {
-		log.Warning("addBuildVariableHandler> Cannot read body: %s\n", errR)
-		return errR
-	}
-
 	// Unmarshal into results
 	var v sdk.Variable
-	if err := json.Unmarshal([]byte(data), &v); err != nil {
-		log.Warning("addBuildVariableHandler> Cannot unmarshal Tests: %s\n", err)
+	if err := UnmarshalBody(r, &v); err != nil {
 		return err
 	}
 
@@ -673,7 +650,7 @@ func addBuildTestResultsHandler(w http.ResponseWriter, r *http.Request, db *gorp
 	}
 
 	// Check that application exists
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("addBuildTestResultsHandler> Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrNotFound
@@ -692,18 +669,9 @@ func addBuildTestResultsHandler(w http.ResponseWriter, r *http.Request, db *gorp
 		return err
 	}
 
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addBuildTestResultsHandler> Cannot read body: %s\n", err)
-		return err
-	}
-
 	// Unmarshal into results
-	var new sdk.Tests
-	err = json.Unmarshal([]byte(data), &new)
-	if err != nil {
-		log.Warning("addBuildtestResultsHandler> Cannot unmarshal Tests: %s\n", err)
+	var new venom.Tests
+	if err := UnmarshalBody(r, &new); err != nil {
 		return err
 	}
 
@@ -785,7 +753,7 @@ func getBuildTestResultsHandler(w http.ResponseWriter, r *http.Request, db *gorp
 	}
 
 	// Check that application exists
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("getBuildTestResultsHandler> Cannot load application %s: %s\n", appName, err)
 		return sdk.ErrNotFound

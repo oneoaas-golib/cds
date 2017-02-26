@@ -64,8 +64,8 @@ func (router *Router) init() {
 	router.Handle("/mon/lastupdates", GET(getUserLastUpdates))
 
 	// Project
-	router.Handle("/project", GET(getProjects), POST(addProject))
-	router.Handle("/project/{permProjectKey}", GET(getProject), PUT(updateProject), DELETE(deleteProject))
+	router.Handle("/project", GET(getProjectsHandler), POST(addProjectHandler))
+	router.Handle("/project/{permProjectKey}", GET(getProjectHandler), PUT(updateProjectHandler), DELETE(deleteProjectHandler))
 	router.Handle("/project/{permProjectKey}/group", POST(addGroupInProject), PUT(updateGroupsInProject))
 	router.Handle("/project/{permProjectKey}/group/{group}", PUT(updateGroupRoleOnProjectHandler), DELETE(deleteGroupFromProjectHandler))
 	router.Handle("/project/{permProjectKey}/variable", GET(getVariablesInProjectHandler), PUT(updateVariablesInProjectHandler))
@@ -86,6 +86,7 @@ func (router *Router) init() {
 	router.Handle("/project/{key}/application/{permApplicationName}/history/env/deploy", GET(getApplicationDeployHistoryHandler))
 	router.Handle("/project/{key}/application/{permApplicationName}/notifications", POST(addNotificationsHandler))
 	router.Handle("/project/{key}/application/{permApplicationName}/pipeline", GET(getPipelinesInApplicationHandler), PUT(updatePipelinesToApplicationHandler))
+	router.Handle("/project/{key}/application/{permApplicationName}/pipeline/attach", POST(attachPipelinesToApplicationHandler))
 	router.Handle("/project/{key}/application/{permApplicationName}/pipeline/{permPipelineKey}", POST(attachPipelineToApplicationHandler), PUT(updatePipelineToApplicationHandler), DELETE(removePipelineFromApplicationHandler))
 	router.Handle("/project/{key}/application/{permApplicationName}/pipeline/{permPipelineKey}/notification", GET(getUserNotificationApplicationPipelineHandler), PUT(updateUserNotificationApplicationPipelineHandler), DELETE(deleteUserNotificationApplicationPipelineHandler))
 	router.Handle("/project/{key}/application/{permApplicationName}/pipeline/{permPipelineKey}/scheduler", GET(getSchedulerApplicationPipelineHandler), POST(addSchedulerApplicationPipelineHandler), PUT(updateSchedulerApplicationPipelineHandler))

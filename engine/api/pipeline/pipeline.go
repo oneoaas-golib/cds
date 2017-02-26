@@ -27,16 +27,6 @@ func UpdatePipelineLastModified(db gorp.SqlExecutor, p *sdk.Pipeline) error {
 	return err
 }
 
-// CountPipelineByProject Count the number of pipelines for the given project
-func CountPipelineByProject(db gorp.SqlExecutor, projectID int64) (int, error) {
-	var nbPipelines int
-	query := `SELECT count(pipeline.id)
-	          FROM pipeline
-	 	  WHERE pipeline.project_id = $1`
-	err := db.QueryRow(query, projectID).Scan(&nbPipelines)
-	return nbPipelines, err
-}
-
 // LoadPipeline loads a pipeline from database
 func LoadPipeline(db gorp.SqlExecutor, projectKey, name string, deep bool) (*sdk.Pipeline, error) {
 	var p sdk.Pipeline
@@ -314,6 +304,13 @@ func LoadGroupByPipeline(db gorp.SqlExecutor, pipeline *sdk.Pipeline) error {
 	return nil
 }
 
+// UpdateLastModified updates last_modified on pipeline
+func UpdateLastModified(db gorp.SqlExecutor, id int64) error {
+	query := `UPDATE pipeline SET last_modified = current_timestamp WHERE id=$1`
+	_, err := db.Exec(query, id)
+	return err
+}
+
 // UpdatePipeline update the pipeline
 func UpdatePipeline(db gorp.SqlExecutor, p *sdk.Pipeline) error {
 	// Update project
@@ -335,7 +332,7 @@ func UpdatePipeline(db gorp.SqlExecutor, p *sdk.Pipeline) error {
 
 // InsertPipeline inserts pipeline informations in database
 func InsertPipeline(db gorp.SqlExecutor, p *sdk.Pipeline) error {
-	query := `INSERT INTO pipeline (name, project_id, type) VALUES ($1,$2,$3) RETURNING id`
+	query := `INSERT INTO pipeline (name, project_id, type, last_modified) VALUES ($1,$2,$3, current_timestamp) RETURNING id, last_modified`
 
 	if p.Name == "" {
 		return sdk.ErrInvalidName
@@ -349,9 +346,11 @@ func InsertPipeline(db gorp.SqlExecutor, p *sdk.Pipeline) error {
 		return sdk.ErrInvalidProject
 	}
 
-	if err := db.QueryRow(query, p.Name, p.ProjectID, string(p.Type)).Scan(&p.ID); err != nil {
+	var lastModified time.Time
+	if err := db.QueryRow(query, p.Name, p.ProjectID, string(p.Type)).Scan(&p.ID, &lastModified); err != nil {
 		return err
 	}
+	p.LastModified = lastModified.Unix()
 
 	for i := range p.Parameter {
 		if err := InsertParameterInPipeline(db, p.ID, &p.Parameter[i]); err != nil {

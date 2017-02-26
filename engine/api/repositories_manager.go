@@ -2,10 +2,8 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,17 +41,8 @@ func addRepositoriesManagerHandler(w http.ResponseWriter, r *http.Request, db *g
 	var args interface{}
 	options := map[string]string{}
 
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addRepositoriesManagerHandler> Cannot read request body: %s", err)
-		return sdk.ErrWrongRequest
-
-	}
-
-	if e := json.Unmarshal(data, &args); e != nil {
-		log.Warning("addRepositoriesManagerHandler> Cannot parse request body: %s", err)
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &args); err != nil {
+		return err
 	}
 
 	t := args.(map[string]interface{})["type"].(string)
@@ -231,17 +220,8 @@ func repositoriesManagerAuthorizeCallback(w http.ResponseWriter, r *http.Request
 	}
 
 	var tv map[string]interface{}
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("repositoriesManagerAuthorizeCallback> Cannot read request body: %s", err)
-		return sdk.ErrWrongRequest
-
-	}
-
-	if e := json.Unmarshal(data, &tv); e != nil {
-		log.Warning("repositoriesManagerAuthorizeCallback> Cannot parse request body: %s", err)
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &tv); err != nil {
+		return err
 	}
 
 	var token, verifier string
@@ -279,16 +259,9 @@ func repositoriesManagerAuthorizeCallback(w http.ResponseWriter, r *http.Request
 
 	}
 
-	p, err := project.Load(db, projectKey, c.User)
+	p, err := project.Load(db, projectKey, c.User, project.LoadOptions.WithRepositoriesManagers)
 	if err != nil {
 		log.Warning("repositoriesManagerAuthorizeCallback> Cannot load project %s: %s\n", projectKey, err)
-		return err
-
-	}
-
-	p.ReposManager, err = repositoriesmanager.LoadAllForProject(db, projectKey)
-	if err != nil {
-		log.Warning("repositoriesManagerAuthorizeCallback> Cannot load repositories manager for project %s: %s\n", projectKey, err)
 		return err
 
 	}
@@ -407,7 +380,7 @@ func attachRepositoriesManager(w http.ResponseWriter, r *http.Request, db *gorp.
 	rmName := vars["name"]
 	fullname := r.FormValue("fullname")
 
-	app, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("attachRepositoriesManager> Cannot load application %s: %s\n", appName, err)
 		return err
@@ -454,10 +427,9 @@ func detachRepositoriesManager(w http.ResponseWriter, r *http.Request, db *gorp.
 	appName := vars["permApplicationName"]
 	rmName := vars["name"]
 
-	application, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithHooks)
 	if err != nil {
-		return sdk.ErrApplicationNotFound
-
+		return err
 	}
 
 	client, err := repositoriesmanager.AuthorizedClient(db, projectKey, rmName)
@@ -471,29 +443,19 @@ func detachRepositoriesManager(w http.ResponseWriter, r *http.Request, db *gorp.
 	tx, err := db.Begin()
 	defer tx.Rollback()
 
-	if err := repositoriesmanager.DeleteForApplication(tx, projectKey, application); err != nil {
+	if err := repositoriesmanager.DeleteForApplication(tx, projectKey, app); err != nil {
 		log.Warning("detachRepositoriesManager> Cannot delete for application: %s", err)
 		return err
 
 	}
 
-	//Remove reposmanager hooks
-	//Load all hooks
-	hooks, err := hook.LoadApplicationHooks(tx, application.ID)
-	if err != nil {
-		log.Warning("detachRepositoriesManager> Cannot get hooks for application: %s", err)
-		return err
-
-	}
-
-	for _, h := range hooks {
+	for _, h := range app.Hooks {
 		s := viper.GetString("api_url") + hook.HookLink
 		link := fmt.Sprintf(s, h.UID, h.Project, h.Repository)
 
 		if err = client.DeleteHook(h.Project+"/"+h.Repository, link); err != nil {
 			log.Warning("detachRepositoriesManager> Cannot delete hook on stash: %s", err)
-			return err
-
+			//do no return, try to delete the hook in database
 		}
 
 		if err := hook.DeleteHook(tx, h.ID); err != nil {
@@ -504,7 +466,7 @@ func detachRepositoriesManager(w http.ResponseWriter, r *http.Request, db *gorp.
 	}
 
 	// Remove reposmanager poller
-	if err := poller.DeleteAll(tx, application.ID); err != nil {
+	if err := poller.DeleteAll(tx, app.ID); err != nil {
 		return err
 
 	}
@@ -515,7 +477,7 @@ func detachRepositoriesManager(w http.ResponseWriter, r *http.Request, db *gorp.
 
 	}
 
-	return WriteJSON(w, r, application, http.StatusOK)
+	return WriteJSON(w, r, app, http.StatusOK)
 }
 
 func getRepositoriesManagerForApplicationsHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
@@ -530,23 +492,14 @@ func addHookOnRepositoriesManagerHandler(w http.ResponseWriter, r *http.Request,
 	rmName := vars["name"]
 
 	var data map[string]string
-	dataBytes, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addHookOnRepositoriesManagerHandler> Cannot read request body: %s", err)
-		return sdk.ErrWrongRequest
-
-	}
-
-	if e := json.Unmarshal(dataBytes, &data); e != nil {
-		log.Warning("addHookOnRepositoriesManagerHandler> Cannot parse request body: %s", err)
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &data); err != nil {
+		return err
 	}
 
 	repoFullname := data["repository_fullname"]
 	pipelineName := data["pipeline_name"]
 
-	app, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		return sdk.ErrApplicationNotFound
 
@@ -597,7 +550,7 @@ func addHookOnRepositoriesManagerHandler(w http.ResponseWriter, r *http.Request,
 
 	}
 
-	if err := application.UpdateLastModified(tx, app); err != nil {
+	if err := application.UpdateLastModified(tx, app, c.User); err != nil {
 		log.Warning("addHookOnRepositoriesManagerHandler> Cannot update application last modified date: %s", err)
 		return err
 
@@ -634,7 +587,7 @@ func deleteHookOnRepositoriesManagerHandler(w http.ResponseWriter, r *http.Reque
 
 	}
 
-	app, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("deleteHookOnRepositoriesManagerHandler> Application not found %s", err)
 		return err
@@ -662,7 +615,7 @@ func deleteHookOnRepositoriesManagerHandler(w http.ResponseWriter, r *http.Reque
 
 	}
 
-	if err = application.UpdateLastModified(tx, app); err != nil {
+	if err = application.UpdateLastModified(tx, app, c.User); err != nil {
 		log.Warning("deleteHookOnRepositoriesManagerHandler> Cannot update application last modified date: %s", err)
 		return err
 
@@ -725,17 +678,8 @@ func addApplicationFromRepositoriesManagerHandler(w http.ResponseWriter, r *http
 	rmName := vars["name"]
 
 	var data map[string]string
-	dataBytes, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addApplicationFromRepositoriesManagerHandler> Cannot read request body: %s", err)
-		return sdk.ErrWrongRequest
-
-	}
-
-	if e := json.Unmarshal(dataBytes, &data); e != nil {
-		log.Warning("addApplicationFromRepositoriesManagerHandler> Cannot parse request body: %s", err)
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &data); err != nil {
+		return err
 	}
 
 	repoFullname := data["repository_fullname"]
@@ -745,7 +689,7 @@ func addApplicationFromRepositoriesManagerHandler(w http.ResponseWriter, r *http
 
 	}
 
-	projectData, err := project.Load(db, projectKey, c.User)
+	proj, err := project.Load(db, projectKey, c.User)
 	if err != nil {
 		log.Warning("addApplicationFromRepositoriesManagerHandler: Cannot load %s: %s\n", projectKey, err)
 		return sdk.ErrInvalidProject
@@ -793,21 +737,20 @@ func addApplicationFromRepositoriesManagerHandler(w http.ResponseWriter, r *http
 	defer tx.Rollback()
 
 	//Insert application in database
-	if err = application.InsertApplication(tx, projectData, &app); err != nil {
+	if err := application.Insert(tx, proj, &app); err != nil {
 		log.Warning("addApplicationFromRepositoriesManagerHandler> Cannot insert pipeline: %s\n", err)
 		return err
 
 	}
 
 	//Fetch groups from project
-	if err = group.LoadGroupByProject(tx, projectData); err != nil {
+	if err := group.LoadGroupByProject(tx, proj); err != nil {
 		log.Warning("addApplicationFromRepositoriesManagerHandler> Cannot load group from project: %s\n", err)
 		return err
-
 	}
 
 	//Add the  groups on the application
-	if err = group.InsertGroupsInApplication(tx, projectData.ProjectGroups, app.ID); err != nil {
+	if err := application.AddGroup(tx, proj, &app, proj.ProjectGroups...); err != nil {
 		log.Warning("addApplicationFromRepositoriesManagerHandler> Cannot add groups on application: %s\n", err)
 		return err
 	}

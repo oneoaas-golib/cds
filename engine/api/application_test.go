@@ -73,20 +73,20 @@ func TestGetApplicationWithTriggersHandler(t *testing.T) {
 	app := &sdk.Application{
 		Name: appName,
 	}
-	if err := application.InsertApplication(db, proj, app); err != nil {
+	if err := application.Insert(db, proj, app); err != nil {
 		t.Fatal(err)
 	}
 
 	// 7. Attach pipeline to application
-	if err := application.AttachPipeline(db, app.ID, pip1.ID); err != nil {
+	if _, err := application.AttachPipeline(db, app.ID, pip1.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := application.AttachPipeline(db, app.ID, pip2.ID); err != nil {
+	if _, err := application.AttachPipeline(db, app.ID, pip2.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := application.AttachPipeline(db, app.ID, pip3.ID); err != nil {
+	if _, err := application.AttachPipeline(db, app.ID, pip3.ID); err != nil {
 		t.Fatal(err)
 	}
 

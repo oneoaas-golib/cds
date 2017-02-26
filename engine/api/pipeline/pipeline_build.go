@@ -25,10 +25,12 @@ type PipelineBuildDbResult struct {
 	ApplicationID         int64          `db:"appID"`
 	PipelineID            int64          `db:"pipID"`
 	EnvironmentID         int64          `db:"envID"`
+	ProjectID             int64          `db:"projID"`
 	ApplicatioName        string         `db:"appName"`
 	PipelineName          string         `db:"pipName"`
 	PipelineType          string         `db:"pipType"`
 	EnvironmentName       string         `db:"envName"`
+	ProjectKey            string         `db:"key"`
 	BuildNumber           int64          `db:"build_number"`
 	Version               int64          `db:"version"`
 	Status                string         `db:"status"`
@@ -49,6 +51,7 @@ type PipelineBuildDbResult struct {
 const (
 	selectPipelineBuild = `
 		SELECT
+			project.id as projID, project.projectkey as key,
 			pb.id as id, pb.application_id as appID, pb.pipeline_id as pipID, pb.environment_id as envID,
 			application.name as appName, pipeline.name as pipName, pipeline.type as pipType, environment.name as envName,
 			pb.build_number as build_number, pb.version as version, pb.status as status,
@@ -63,6 +66,7 @@ const (
 		JOIN application ON application.id = pb.application_id
 		JOIN pipeline ON pipeline.id = pb.pipeline_id
 		JOIN environment ON environment.id = pb.environment_id
+		JOIN project ON project.id = application.project_id
 		LEFT JOIN "user" ON "user".id = pb.triggered_by
 	`
 )
@@ -71,9 +75,9 @@ const (
 func SelectBuildForUpdate(db gorp.SqlExecutor, buildID int64) error {
 	var id int64
 	query := `SELECT id
-	          FROM pipeline_build
-	          WHERE id = $1 AND status = $2
-		  FOR UPDATE NOWAIT`
+                 FROM pipeline_build
+                 WHERE id = $1 AND status = $2
+                 FOR UPDATE NOWAIT`
 	return db.QueryRow(query, buildID, sdk.StatusBuilding.String()).Scan(&id)
 }
 
@@ -123,28 +127,23 @@ func LoadPipelineBuildByApplicationAndBranch(db gorp.SqlExecutor, appID int64, b
 	return pbs, nil
 }
 
-// LoadBuildingPipelines Load all building pipeline
-func LoadBuildingPipelines(db gorp.SqlExecutor) ([]sdk.PipelineBuild, error) {
-	whereCondition := `
-		WHERE pb.status = $1
-		ORDER by pb.id ASC
-	`
-	query := fmt.Sprintf("%s %s", selectPipelineBuild, whereCondition)
-	var rows []PipelineBuildDbResult
-	_, err := db.Select(&rows, query, sdk.StatusBuilding.String())
+// LoadBuildingPipelinesIDs Load all building pipeline id
+func LoadBuildingPipelinesIDs(db gorp.SqlExecutor) ([]int64, error) {
+	query := "SELECT id FROM pipeline_build WHERE status = $1 ORDER BY id ASC"
+	rows, err := db.Query(query, sdk.StatusBuilding.String())
 	if err != nil {
 		return nil, err
 	}
-
-	pbs := []sdk.PipelineBuild{}
-	for _, r := range rows {
-		pb, errScan := scanPipelineBuild(r)
-		if errScan != nil {
-			return nil, errScan
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
-		pbs = append(pbs, *pb)
+		ids = append(ids, id)
 	}
-	return pbs, nil
+	return ids, nil
 }
 
 // LoadRecentPipelineBuild retrieves pipelines in database having a build running or finished
@@ -321,17 +320,22 @@ func scanPipelineBuild(pbResult PipelineBuildDbResult) (*sdk.PipelineBuild, erro
 	pb := sdk.PipelineBuild{
 		ID: pbResult.ID,
 		Application: sdk.Application{
-			ID:   pbResult.ApplicationID,
-			Name: pbResult.ApplicatioName,
+			ID:         pbResult.ApplicationID,
+			Name:       pbResult.ApplicatioName,
+			ProjectKey: pbResult.ProjectKey,
 		},
 		Pipeline: sdk.Pipeline{
-			ID:   pbResult.PipelineID,
-			Name: pbResult.PipelineName,
-			Type: pbResult.PipelineType,
+			ID:         pbResult.PipelineID,
+			Name:       pbResult.PipelineName,
+			Type:       pbResult.PipelineType,
+			ProjectKey: pbResult.ProjectKey,
+			ProjectID:  pbResult.ProjectID,
 		},
 		Environment: sdk.Environment{
-			ID:   pbResult.EnvironmentID,
-			Name: pbResult.EnvironmentName,
+			ID:         pbResult.EnvironmentID,
+			Name:       pbResult.EnvironmentName,
+			ProjectKey: pbResult.ProjectKey,
+			ProjectID:  pbResult.ProjectID,
 		},
 		BuildNumber: pbResult.BuildNumber,
 		Version:     pbResult.Version,
@@ -425,17 +429,6 @@ func UpdatePipelineBuildStatusAndStage(db gorp.SqlExecutor, pb *sdk.PipelineBuil
 	}
 
 	if pb.Status != newStatus {
-		query := `
-			SELECT projectkey FROM project
-			JOIN application ON application.project_id = project.id
-			WHERE application.id = $1
-		`
-		var key string
-		if err := db.QueryRow(query, pb.Application.ID).Scan(&key); err != nil {
-			log.Critical("UpdatePipelineBuildStatus> error while loading project key from appID %d err %s", pb.Application.ID, err)
-		}
-		pb.Pipeline.ProjectKey = key
-
 		pb.Status = newStatus
 		event.PublishPipelineBuild(db, pb, previous)
 	}

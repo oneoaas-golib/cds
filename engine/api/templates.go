@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -18,8 +17,6 @@ import (
 	"github.com/ovh/cds/engine/api/application"
 	"github.com/ovh/cds/engine/api/auth"
 	"github.com/ovh/cds/engine/api/context"
-	"github.com/ovh/cds/engine/api/environment"
-	"github.com/ovh/cds/engine/api/group"
 	"github.com/ovh/cds/engine/api/objectstore"
 	"github.com/ovh/cds/engine/api/project"
 	"github.com/ovh/cds/engine/api/sanity"
@@ -305,40 +302,19 @@ func applyTemplateHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap
 	projectKey := vars["permProjectKey"]
 
 	// Load the project
-	proj, err := project.Load(db, projectKey, c.User)
+	proj, err := project.Load(db, projectKey, c.User,
+		project.LoadOptions.Default,
+		project.LoadOptions.WithEnvironments,
+		project.LoadOptions.WithGroups)
 	if err != nil {
 		log.Warning("applyTemplatesHandler> Cannot load project %s: %s\n", projectKey, err)
 		return err
-
-	}
-
-	proj.Environments, err = environment.LoadEnvironments(db, projectKey, true, c.User)
-	if err != nil {
-		log.Warning("applyTemplatesHandler: Cannot load environments: %s\n", projectKey, err)
-		return err
-	}
-
-	// Load groups on the project
-	if err := group.LoadGroupByProject(db, proj); err != nil {
-		log.Warning("applyTemplatesHandler> Cannot load project groups %s: %s\n", projectKey, err)
-		return err
-
-	}
-
-	// Get data in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("applyTemplatesHandler> Cannot read body %s: %s\n", string(data), err)
-		return sdk.ErrWrongRequest
-
 	}
 
 	// Parse body to sdk.ApplyTemplatesOptions
 	var opts sdk.ApplyTemplatesOptions
-	if err := json.Unmarshal(data, &opts); err != nil {
-		log.Warning("applyTemplatesHandler> Cannot parse body %s: %s\n", string(data), err)
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &opts); err != nil {
+		return err
 	}
 
 	// Create a session for current user
@@ -372,7 +348,7 @@ func applyTemplateHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap
 
 	}
 
-	apps, errApp := application.LoadApplications(db, proj.Key, false, true, c.User)
+	apps, errApp := application.LoadAll(db, proj.Key, c.User, application.LoadOptions.WithVariables)
 	if errApp != nil {
 		log.Warning("applyTemplatesHandler> Cannot load applications: %s\n", err)
 		return err
@@ -397,7 +373,7 @@ func applyTemplateOnApplicationHandler(w http.ResponseWriter, r *http.Request, d
 	appName := vars["permApplicationName"]
 
 	// Load the project
-	proj, err := project.Load(db, projectKey, c.User)
+	proj, err := project.Load(db, projectKey, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("applyTemplateOnApplicationHandler> Cannot load project %s: %s\n", projectKey, err)
 		return err
@@ -405,26 +381,17 @@ func applyTemplateOnApplicationHandler(w http.ResponseWriter, r *http.Request, d
 	}
 
 	// Load the application
-	app, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.Default)
 	if err != nil {
 		log.Warning("applyTemplateOnApplicationHandler> Cannot load application %s: %s\n", appName, err)
 		return err
 
 	}
 
-	// Get data in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("applyTemplateOnApplicationHandler> Unable to read body : %s\n", err)
-		return sdk.ErrWrongRequest
-
-	}
-
 	// Parse body to sdk.ApplyTemplatesOptions
 	var opts sdk.ApplyTemplatesOptions
-	if err := json.Unmarshal(data, &opts); err != nil {
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &opts); err != nil {
+		return err
 	}
 
 	//Create a session for current user

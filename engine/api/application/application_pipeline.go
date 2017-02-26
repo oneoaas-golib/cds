@@ -12,7 +12,6 @@ import (
 	"github.com/ovh/cds/engine/api/permission"
 	"github.com/ovh/cds/engine/api/pipeline"
 	"github.com/ovh/cds/engine/api/trigger"
-	"github.com/ovh/cds/engine/log"
 	"github.com/ovh/cds/sdk"
 )
 
@@ -32,15 +31,15 @@ func IsAttached(db gorp.SqlExecutor, projectID, appID int64, pipelineName string
 }
 
 // AttachPipeline Attach a pipeline to an application
-func AttachPipeline(db gorp.SqlExecutor, appID, pipelineID int64) error {
-	query := `INSERT INTO application_pipeline(application_id, pipeline_id, args) VALUES($1, $2, $3)`
-	_, err := db.Exec(query, appID, pipelineID, "[]")
-	if err != nil {
+func AttachPipeline(db gorp.SqlExecutor, appID, pipelineID int64) (int64, error) {
+	query := `INSERT INTO application_pipeline(application_id, pipeline_id, args) VALUES($1, $2, $3) RETURNING id`
+	var id int64
+	if err := db.QueryRow(query, appID, pipelineID, "[]").Scan(&id); err != nil {
 		if errPG, ok := err.(*pq.Error); ok && errPG.Code == "23505" {
-			return sdk.ErrPipelineAlreadyAttached
+			return 0, sdk.ErrPipelineAlreadyAttached
 		}
 	}
-	return err
+	return id, nil
 }
 
 // GetAllPipelines Get all pipelines for the given application
@@ -241,34 +240,6 @@ func RemovePipeline(db gorp.SqlExecutor, key, appName, pipelineName string) erro
 	}
 
 	return nil
-}
-
-// UpdatePipelineApplication Update arguments passed to pipeline
-func UpdatePipelineApplication(db gorp.SqlExecutor, app *sdk.Application, pipelineID int64, params []sdk.Parameter) error {
-	data, err := json.Marshal(params)
-	if err != nil {
-		log.Warning("UpdatePipelineApplication> Cannot marshal parameters:  %s \n", err)
-		return fmt.Errorf("UpdatePipelineApplication>Cannot marshal parameters:  %s", err)
-	}
-	return UpdatePipelineApplicationString(db, app, pipelineID, string(data))
-}
-
-// UpdatePipelineApplicationString Update application pipeline parameters
-func UpdatePipelineApplicationString(db gorp.SqlExecutor, app *sdk.Application, pipelineID int64, data string) error {
-	query := `
-		UPDATE application_pipeline SET 
-		args = $1,
-		last_modified = current_timestamp
-		WHERE application_id=$2 AND pipeline_id=$3
-		`
-
-	// TODO: cipher args here
-	_, err := db.Exec(query, data, app.ID, pipelineID)
-	if err != nil {
-		return err
-	}
-
-	return UpdateLastModified(db, app)
 }
 
 // GetAllPipelineParam Get all the pipeline parameters

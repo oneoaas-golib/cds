@@ -39,7 +39,7 @@ func Pipelines() {
 
 		db := database.DBMap(database.DB())
 		if db != nil && !m {
-			pipelines, err := pipeline.LoadBuildingPipelines(db)
+			ids, err := pipeline.LoadBuildingPipelinesIDs(db)
 			if err != nil {
 				log.Warning("queue.Pipelines> Cannot load building pipelines: %s\n", err)
 				// Add some extra sleep if db is down...
@@ -47,26 +47,24 @@ func Pipelines() {
 				continue
 			}
 
-			for i := range pipelines {
-				RunActions(db, pipelines[i])
+			for _, id := range ids {
+				runPipeline(db, id)
 			}
 		}
 	}
 }
 
-// RunActions Schedule action for the given Build
-func RunActions(db *gorp.DbMap, pb sdk.PipelineBuild) {
+func runPipeline(db *gorp.DbMap, pbID int64) {
 	tx, err := db.Begin()
 	if err != nil {
-		log.Warning("queue.RunActions> cannot start tx for pb %d: %s\n", pb.ID, err)
+		log.Warning("queue.RunActions> cannot start tx for pb %d: %s\n", pbID, err)
 		return
 	}
 	defer tx.Rollback()
 
 	// Reload pipeline build with a FOR UPDATE NOT WAIT
 	// So only one instance of the API can update it and/or end it
-	err = pipeline.SelectBuildForUpdate(tx, pb.ID)
-	if err != nil {
+	if err := pipeline.SelectBuildForUpdate(tx, pbID); err != nil {
 		// if ErrNoRows, pipelines is already done
 		if err == sql.ErrNoRows {
 			return
@@ -80,9 +78,18 @@ func RunActions(db *gorp.DbMap, pb sdk.PipelineBuild) {
 		return
 	}
 
+	pb, errPB := pipeline.LoadPipelineBuildByID(db, pbID)
+	if errPB != nil {
+		log.Warning("queue.RunActions> Cannot load pb [%d]: %s\n", pbID, err)
+		return
+	}
+
+	if pb.Status != sdk.StatusBuilding {
+		return
+	}
+
 	pbNewStatus := sdk.StatusBuilding
 
-	// OH! AN EMPTY PIPELINE
 	if len(pb.Stages) == 0 {
 		// Pipeline is done
 		pbNewStatus = sdk.StatusSuccess
@@ -133,7 +140,7 @@ func RunActions(db *gorp.DbMap, pb sdk.PipelineBuild) {
 		}
 	}
 
-	if err := pipeline.UpdatePipelineBuildStatusAndStage(tx, &pb, pbNewStatus); err != nil {
+	if err := pipeline.UpdatePipelineBuildStatusAndStage(tx, pb, pbNewStatus); err != nil {
 		log.Warning("RunActions> Cannot update UpdatePipelineBuildStatusAndStage on pb %d: %s\n", pb.ID, err)
 		return
 	}
@@ -152,7 +159,7 @@ func RunActions(db *gorp.DbMap, pb sdk.PipelineBuild) {
 	}
 }
 
-func addJobsToQueue(tx gorp.SqlExecutor, stage *sdk.Stage, pb sdk.PipelineBuild) error {
+func addJobsToQueue(tx gorp.SqlExecutor, stage *sdk.Stage, pb *sdk.PipelineBuild) error {
 	//Check stage prerequisites
 	prerequisitesOK, err := pipeline.CheckPrerequisites(*stage, pb)
 	if err != nil {
@@ -164,7 +171,6 @@ func addJobsToQueue(tx gorp.SqlExecutor, stage *sdk.Stage, pb sdk.PipelineBuild)
 	for _, job := range stage.Jobs {
 		pbJobParams, errParam := getPipelineBuildJobParameters(tx, job, pb)
 		if errParam != nil {
-			log.Warning("addJobsToQueue> Cannot get action build parameters for pipeline build %d: %s\n", pb.ID, err)
 			return errParam
 		}
 		pbJob := sdk.PipelineBuildJob{
@@ -187,7 +193,7 @@ func addJobsToQueue(tx gorp.SqlExecutor, stage *sdk.Stage, pb sdk.PipelineBuild)
 			log.Warning("addJobToQueue> Cannot insert job in queue for pipeline build %d: %s\n", pb.ID, err)
 			return err
 		}
-		event.PublishActionBuild(&pb, &pbJob)
+		event.PublishActionBuild(pb, &pbJob)
 		stage.PipelineBuildJobs = append(stage.PipelineBuildJobs, pbJob)
 	}
 
@@ -258,7 +264,7 @@ func syncPipelineBuildJob(db gorp.SqlExecutor, stage *sdk.Stage) (bool, error) {
 	return stageEnd, nil
 }
 
-func pipelineBuildEnd(tx gorp.SqlExecutor, pb sdk.PipelineBuild) error {
+func pipelineBuildEnd(tx gorp.SqlExecutor, pb *sdk.PipelineBuild) error {
 	// run trigger
 	triggers, err := trigger.LoadAutomaticTriggersAsSource(tx, pb.Application.ID, pb.Pipeline.ID, pb.Environment.ID)
 	if err != nil {
@@ -294,11 +300,11 @@ func pipelineBuildEnd(tx gorp.SqlExecutor, pb sdk.PipelineBuild) error {
 
 		parameters := t.Parameters
 		// Add parent build info
-		parentParams := ParentBuildInfos(&pb)
+		parentParams := ParentBuildInfos(pb)
 		parameters = append(parameters, parentParams...)
 
 		// Start build
-		app, err := application.LoadApplicationByName(tx, t.DestProject.Key, t.DestApplication.Name, application.WithClearPassword())
+		app, err := application.LoadByName(tx, t.DestProject.Key, t.DestApplication.Name, nil, application.LoadOptions.WithRepositoryManager, application.LoadOptions.WithTriggers, application.LoadOptions.WithVariablesWithClearPassword)
 		if err != nil {
 			log.Warning("pipelineBuildEnd> Cannot load destination application: %s\n", err)
 			return err
@@ -309,7 +315,7 @@ func pipelineBuildEnd(tx gorp.SqlExecutor, pb sdk.PipelineBuild) error {
 		trigger := sdk.PipelineBuildTrigger{
 			ManualTrigger:       false,
 			TriggeredBy:         pb.Trigger.TriggeredBy,
-			ParentPipelineBuild: &pb,
+			ParentPipelineBuild: pb,
 			VCSChangesAuthor:    pb.Trigger.VCSChangesAuthor,
 			VCSChangesBranch:    pb.Trigger.VCSChangesBranch,
 			VCSChangesHash:      pb.Trigger.VCSChangesHash,
@@ -360,53 +366,32 @@ func ParentBuildInfos(pb *sdk.PipelineBuild) []sdk.Parameter {
 	return params
 }
 
-func getPipelineBuildJobParameters(db gorp.SqlExecutor, j sdk.Job, pb sdk.PipelineBuild) ([]sdk.Parameter, error) {
-
-	// Get project and pipeline Information
-	projectData, err := project.LoadProjectByPipelineActionID(db, j.PipelineActionID)
-	if err != nil {
-		log.Debug("getActionBuildParameters> err LoadProjectAndPipelineByPipelineActionID: %s", err)
-		return nil, err
-	}
+func getPipelineBuildJobParameters(db gorp.SqlExecutor, j sdk.Job, pb *sdk.PipelineBuild) ([]sdk.Parameter, error) {
 
 	// Load project Variables
-	projectVariables, err := project.GetAllVariableInProject(db, projectData.ID)
+	projectVariables, err := project.GetAllVariableInProject(db, pb.Pipeline.ProjectID)
 	if err != nil {
-		log.Debug("getActionBuildParameters> err GetAllVariableInProject: %s", err)
+		log.Warning("getActionBuildParameters> err GetAllVariableInProject on ID %d: %s", pb.Pipeline.ProjectID, err)
 		return nil, err
 	}
 	// Load application Variables
 	appVariables, err := application.GetAllVariableByID(db, pb.Application.ID)
 	if err != nil {
-		log.Debug("getActionBuildParameters> err GetAllVariableByID for app ID: %s", err)
+		log.Warning("getActionBuildParameters> err GetAllVariableByID for app ID %d: %s", pb.Application.ID, err)
 		return nil, err
 	}
 	// Load environment Variables
 	envVariables, err := environment.GetAllVariableByID(db, pb.Environment.ID)
 	if err != nil {
-		log.Debug("getActionBuildParameters> err GetAllVariableByID for env ID : %s", err)
+		log.Warning("getActionBuildParameters> err GetAllVariableByID for env ID %d: %s", pb.Environment.ID, err)
 		return nil, err
 	}
 
 	pipelineParameters, err := pipeline.GetAllParametersInPipeline(db, pb.Pipeline.ID)
 	if err != nil {
-		log.Debug("getActionBuildParameters> err GetAllParametersInPipeline: %s", err)
+		log.Warning("getActionBuildParameters> err GetAllParametersInPipeline for pip %d: %s", pb.Pipeline.ID, err)
 		return nil, err
 	}
 
-	/* Create and process the full set of build variables from
-	** - Project variables
-	** - Pipeline variables
-	** - Action definition in pipeline
-	** - ActionBuild variables (global ones + trigger parameters)
-	**
-	** -> Replaces all placeholder but PasswordParameter
-	 */
-	params, err := action.ProcessActionBuildVariables(
-		projectVariables,
-		appVariables,
-		envVariables,
-		pipelineParameters,
-		pb.Parameters, j.Action)
-	return params, nil
+	return action.ProcessActionBuildVariables(projectVariables, appVariables, envVariables, pipelineParameters, pb.Parameters, j.Action), nil
 }

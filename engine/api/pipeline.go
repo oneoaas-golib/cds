@@ -1,9 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -37,20 +34,12 @@ func rollbackPipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 	appName := vars["permApplicationName"]
 
 	var request sdk.RunRequest
-
-	// Get args in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return err
-	}
-	// Unmarshal args
-	err = json.Unmarshal(data, &request)
-	if err != nil {
+	if err := UnmarshalBody(r, &request); err != nil {
 		return err
 	}
 
 	// Load application
-	app, err := application.LoadApplicationByName(db, projectKey, appName, application.WithClearPassword())
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithRepositoryManager, application.LoadOptions.WithTriggers, application.LoadOptions.WithVariablesWithClearPassword)
 	if err != nil {
 		if err != sdk.ErrApplicationNotFound {
 			log.Warning("rollbackPipelineHandler> Cannot load application %s: %s\n", appName, err)
@@ -153,7 +142,7 @@ func runPipelineWithLastParentHandler(w http.ResponseWriter, r *http.Request, db
 	pipelineName := vars["permPipelineKey"]
 	appName := vars["permApplicationName"]
 
-	app, err := application.LoadApplicationByName(db, projectKey, appName, application.WithClearPassword())
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithRepositoryManager, application.LoadOptions.WithTriggers, application.LoadOptions.WithVariablesWithClearPassword)
 	if err != nil {
 		if err != sdk.ErrApplicationNotFound {
 			log.Warning("runPipelineWithLastParentHandler> Cannot load application %s: %s\n", appName, err)
@@ -161,16 +150,9 @@ func runPipelineWithLastParentHandler(w http.ResponseWriter, r *http.Request, db
 		return err
 	}
 
-	// Get args in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-	}
-
 	var request sdk.RunRequest
-	// Unmarshal args
-	if err := json.Unmarshal(data, &request); err != nil {
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &request); err != nil {
+		return err
 	}
 
 	//Check parent stuff
@@ -192,7 +174,7 @@ func runPipelineWithLastParentHandler(w http.ResponseWriter, r *http.Request, db
 	}
 
 	// Check that pipeline is attached to application
-	ok, err := application.PipelineAttached(db, app.ID, pip.ID)
+	ok, err := application.IsAttached(db, app.ProjectID, app.ID, pip.Name)
 	if !ok {
 		log.Warning("runPipelineWithLastParentHandler> Pipeline %s is not attached to app %s\n", pipelineName, appName)
 		return sdk.ErrPipelineNotAttached
@@ -217,7 +199,7 @@ func runPipelineWithLastParentHandler(w http.ResponseWriter, r *http.Request, db
 	//Find parent trigger
 	var trig *sdk.PipelineTrigger
 	for i, t := range triggers {
-		fmt.Printf("Trigger from app(%s[%d]) pip(%s[%d]) env(%s[%d]) to app(%s[%d]) pip(%s[%d]) env(%s[%d])\n", t.SrcApplication.Name, t.SrcApplication.ID, t.SrcPipeline.Name, t.SrcPipeline.ID, t.SrcEnvironment.Name, t.SrcEnvironment.ID, t.DestApplication.Name, t.DestApplication.ID, t.DestPipeline.Name, t.DestPipeline.ID, t.DestEnvironment.Name, t.DestEnvironment.ID)
+		log.Debug("Trigger from app(%s[%d]) pip(%s[%d]) env(%s[%d]) to app(%s[%d]) pip(%s[%d]) env(%s[%d])\n", t.SrcApplication.Name, t.SrcApplication.ID, t.SrcPipeline.Name, t.SrcPipeline.ID, t.SrcEnvironment.Name, t.SrcEnvironment.ID, t.DestApplication.Name, t.DestApplication.ID, t.DestPipeline.Name, t.DestPipeline.ID, t.DestEnvironment.Name, t.DestEnvironment.ID)
 		if t.SrcApplication.ID == request.ParentApplicationID &&
 			t.SrcPipeline.ID == request.ParentPipelineID &&
 			t.SrcEnvironment.ID == envID {
@@ -259,11 +241,7 @@ func runPipelineHandlerFunc(w http.ResponseWriter, r *http.Request, db *gorp.DbM
 	pipelineName := vars["permPipelineKey"]
 	appName := vars["permApplicationName"]
 
-	// Load application to be send to scheduler.Run() from DB
-	cache.DeleteAll(cache.Key("application", projectKey, "*"))
-	cache.DeleteAll(cache.Key("pipeline", projectKey, "*"))
-
-	app, err := application.LoadApplicationByName(db, projectKey, appName, application.WithClearPassword())
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithRepositoryManager, application.LoadOptions.WithTriggers, application.LoadOptions.WithVariablesWithClearPassword)
 	if err != nil {
 		if err != sdk.ErrApplicationNotFound {
 			log.Warning("runPipelineHandler> Cannot load application %s: %s\n", appName, err)
@@ -271,24 +249,17 @@ func runPipelineHandlerFunc(w http.ResponseWriter, r *http.Request, db *gorp.DbM
 		return err
 	}
 
-	// Load pipeline
-	pip, err := pipeline.LoadPipeline(db, projectKey, pipelineName, false)
-	if err != nil {
-		if err != sdk.ErrPipelineNotFound {
-			log.Warning("runPipelineHandler> Cannot load pipeline %s; %s\n", pipelineName, err)
+	var pip *sdk.Pipeline
+	for _, p := range app.Pipelines {
+		if p.Pipeline.Name == pipelineName {
+			pip = &p.Pipeline
+			break
 		}
-		return err
 	}
 
-	// Check that pipeline is attached to application
-	ok, err := application.PipelineAttached(db, app.ID, pip.ID)
-	if !ok {
+	if pip == nil {
 		log.Warning("runPipelineHandler> Pipeline %s is not attached to app %s\n", pipelineName, appName)
 		return sdk.ErrPipelineNotAttached
-	}
-	if err != nil {
-		log.Warning("runPipelineHandler> Cannot check if pipeline %s is attached to %s: %s\n", pipelineName, appName, err)
-		return err
 	}
 
 	version := int64(0)
@@ -301,30 +272,23 @@ func runPipelineHandlerFunc(w http.ResponseWriter, r *http.Request, db *gorp.DbM
 		}
 		pb, err := pipeline.LoadPipelineBuildByApplicationPipelineEnvBuildNumber(db, request.ParentApplicationID, request.ParentPipelineID, envID, request.ParentBuildNumber)
 		if err != nil {
-			log.Warning("runPipelineHandler> Cannot load parent pipeline build: %s\n", err)
-			return err
+			return sdk.WrapError(err, "runPipelineHandler> Cannot load parent pipeline build")
 		}
 		parentParams := queue.ParentBuildInfos(pb)
 		request.Params = append(request.Params, parentParams...)
 
-		// Whether or not use parent build version is checked
-		// in InsertPipelineBuild
-		//if pip.Type != sdk.BuildPipeline {
 		version = pb.Version
-		//}
-		//save the pointer of the parent pipeline_build for trigger struct
 		parentPipelineBuild = pb
 	}
 
 	envDest, err := loadDestEnvFromRunRequest(db, c, request, projectKey)
 	if err != nil {
-		return err
+		return sdk.WrapError(err, "runPipelineHandler> Unable to load dest environment")
 	}
 
 	tx, err := db.Begin()
 	if err != nil {
-		log.Warning("runPipelineHandler> Cannot start tx: %s", err)
-		return err
+		return sdk.WrapError(err, "runPipelineHandler> Cannot start tx")
 	}
 	defer tx.Rollback()
 
@@ -345,35 +309,20 @@ func runPipelineHandlerFunc(w http.ResponseWriter, r *http.Request, db *gorp.DbM
 
 	pb, err := queue.RunPipeline(tx, projectKey, app, pipelineName, envDest.Name, request.Params, version, trigger, c.User)
 	if err != nil {
-		log.Warning("runPipelineHandler> Cannot run pipeline: %s\n", err)
-		return err
+		return sdk.WrapError(err, "runPipelineHandler> Cannot run pipeline")
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		log.Warning("runPipelineHandler> Cannot commit tx: %s", err)
-		return err
+	if err := tx.Commit(); err != nil {
+		return sdk.WrapError(err, "runPipelineHandler> Cannot commit tx")
 	}
-
-	k := cache.Key("application", projectKey, "builds", "*")
-	cache.DeleteAll(k)
 
 	return WriteJSON(w, r, pb, http.StatusOK)
 }
 
 func runPipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
 	var request sdk.RunRequest
-
-	// Get args in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-	}
-
-	// Unmarshal args
-	err = json.Unmarshal(data, &request)
-	if err != nil {
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &request); err != nil {
+		return err
 	}
 
 	return runPipelineHandlerFunc(w, r, db, c, &request)
@@ -393,17 +342,7 @@ func updatePipelineActionHandler(w http.ResponseWriter, r *http.Request, db *gor
 	}
 
 	var job sdk.Job
-
-	// Get args in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updatePipelineActionHandler>Cannot read body: %s\n", err)
-		return err
-	}
-
-	err = json.Unmarshal(data, &job)
-	if err != nil {
-		log.Warning("updatePipelineActionHandler>Cannot unmarshal request: %s\n", err)
+	if err := UnmarshalBody(r, &job); err != nil {
 		return err
 	}
 
@@ -508,17 +447,8 @@ func updatePipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMa
 	name := vars["permPipelineKey"]
 
 	var p sdk.Pipeline
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updatePipelineHandler: Cannot read body: %s", err)
-		return sdk.ErrWrongRequest
-	}
-
-	err = json.Unmarshal(data, &p)
-	if err != nil {
-		log.Warning("updatePipelineHandler: Cannot unmarshal body: %s", err)
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &p); err != nil {
+		return err
 	}
 
 	// check pipeline name pattern
@@ -560,7 +490,7 @@ func getApplicationUsingPipelineHandler(w http.ResponseWriter, r *http.Request, 
 		log.Warning("getApplicationUsingPipelineHandler> Cannot load pipeline %s: %s\n", name, err)
 		return err
 	}
-	applications, err := application.LoadApplicationByPipeline(db, pipelineData.ID)
+	applications, err := application.LoadByPipeline(db, pipelineData.ID, c.User)
 	if err != nil {
 		log.Warning("getApplicationUsingPipelineHandler> Cannot load applications using pipeline %s: %s\n", name, err)
 		return err
@@ -573,22 +503,15 @@ func addPipeline(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 	// Get project name in URL
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
-
-	project, err := project.Load(db, key, c.User)
+	project, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("AddPipeline: Cannot load %s: %s\n", key, err)
 		return err
 	}
 
 	var p sdk.Pipeline
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-	}
-
-	if err := json.Unmarshal(data, &p); err != nil {
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &p); err != nil {
+		return err
 	}
 
 	// check pipeline name pattern
@@ -626,6 +549,9 @@ func addPipeline(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 		return err
 	}
 
+	for _, g := range project.ProjectGroups {
+		p.GroupPermission = append(p.GroupPermission, g)
+	}
 
 	if err := group.InsertGroupsInPipeline(tx, project.ProjectGroups, p.ID); err != nil {
 		log.Warning("addPipelineHandler> Cannot add groups on pipeline: %s\n", err)
@@ -633,8 +559,13 @@ func addPipeline(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 	}
 
 	for _, app := range p.AttachedApplication {
-		if err := application.AttachPipeline(tx, app.ID, p.ID); err != nil {
+		if _, err := application.AttachPipeline(tx, app.ID, p.ID); err != nil {
 			log.Warning("addPipelineHandler> Cannot attach pipeline %d to %d: %s\n", app.ID, p.ID, err)
+			return err
+		}
+
+		if err := application.UpdateLastModified(tx, &app, c.User); err != nil {
+			log.Warning("addPipelineHandler> Cannot update application last modified date: %s\n", err)
 			return err
 		}
 	}
@@ -644,10 +575,9 @@ func addPipeline(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 		return err
 	}
 
-	k := cache.Key("application", key, "*")
-	cache.DeleteAll(k)
+	p.Permission = permission.PermissionReadWriteExecute
 
-	return nil
+	return WriteJSON(w, r, p, http.StatusOK)
 }
 
 func getPipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
@@ -676,7 +606,7 @@ func getPipelinesHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap,
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
 
-	project, err := project.Load(db, key, c.User)
+	project, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		if err != sdk.ErrNoProject {
 			log.Warning("getPipelinesHandler: Cannot load %s: %s\n", key, err)
@@ -731,7 +661,7 @@ func getPipelineHistoryHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 		return err
 	}
 
-	a, err := application.LoadApplicationByName(db, projectKey, appName)
+	a, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		if err != sdk.ErrApplicationNotFound {
 			log.Warning("getPipelineHistoryHandler> Cannot load application %s: %s\n", appName, err)
@@ -833,21 +763,12 @@ func addJobToPipelineHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 
 	}
 
-	// Get args in body
-	data, errRead := ioutil.ReadAll(r.Body)
-	if errRead != nil {
-		log.Warning("addJoinedActionToPipelineHandler> Cannot read body: %s\n", errRead)
-		return sdk.ErrWrongRequest
-
-	}
-
 	var job sdk.Job
-	if err := json.Unmarshal(data, &job); err != nil {
-		log.Warning("addJoinedActionToPipelineHandler> Cannot unmarshall body: %s\n", err)
-		return sdk.ErrWrongRequest
+	if err := UnmarshalBody(r, &job); err != nil {
+		return err
 	}
 
-	proj, errP := project.Load(db, projectKey, c.User, project.WithVariables(), project.WithApplications(1))
+	proj, errP := project.Load(db, projectKey, c.User, project.LoadOptions.Default)
 	if errP != nil {
 		log.Warning("addJoinedActionToPipelineHandler> Cannot load project %s: %s\n", projectKey, errP)
 		return errP
@@ -899,7 +820,7 @@ func updateJoinedAction(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, 
 	key := vars["key"]
 	pipName := vars["permPipelineKey"]
 
-	proj, err := project.Load(db, key, c.User, project.WithVariables(), project.WithApplications(1))
+	proj, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("updateJoinedAction> Cannot load project %s: %s\n", key, err)
 		return sdk.ErrNoProject
@@ -920,19 +841,9 @@ func updateJoinedAction(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, 
 
 	}
 
-	// Get args in body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updateJoinedAction> Unable to parse payload: %s", err)
-		return sdk.ErrWrongRequest
-
-	}
-
-	a, err := sdk.NewAction("").FromJSON(data)
-	if err != nil {
-		log.Warning("updateJoinedAction> Unable to parse json %s: %s\n", actionIDString, err)
-		return sdk.ErrWrongRequest
-
+	var a sdk.Action
+	if err := UnmarshalBody(r, &a); err != nil {
+		return err
 	}
 	a.ID = actionID
 
@@ -957,7 +868,7 @@ func updateJoinedAction(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, 
 	}
 	defer tx.Rollback()
 
-	if err := action.UpdateActionDB(tx, a, c.User.ID); err != nil {
+	if err := action.UpdateActionDB(tx, &a, c.User.ID); err != nil {
 		log.Warning("updateJoinedAction> cannot update action: %s\n", err)
 		return err
 
@@ -1158,7 +1069,7 @@ func stopPipelineBuildHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 	}
 
 	// Load application
-	app, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("stopPipelineBuildHandler> Cannot load application: %s\n", err)
 		return err
@@ -1249,7 +1160,7 @@ func restartPipelineBuildHandler(w http.ResponseWriter, r *http.Request, db *gor
 	}
 
 	// Load application
-	app, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User)
 	if err != nil {
 		log.Warning("restartPipelineBuildHandler> Cannot load application: %s\n", err)
 		return err
@@ -1356,25 +1267,23 @@ func getPipelineCommitsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
 		log.Warning("getPipelineCommitsHandler> No enought right on this environment %s: \n", envName)
 		return sdk.ErrForbidden
-
 	}
 
 	//Load the application
-	application, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithRepositoryManager)
 	if err != nil {
-		return sdk.ErrApplicationNotFound
-
+		return err
 	}
 
 	commits := []sdk.VCSCommit{}
 
 	//Check it the application is attached to a repository
-	if application.RepositoriesManager == nil {
+	if app.RepositoriesManager == nil {
 		log.Warning("getPipelineCommitsHandler> Application %s/%s not attached to a repository manager", projectKey, appName)
 		return WriteJSON(w, r, commits, http.StatusOK)
 	}
 
-	pbs, err := pipeline.LoadPipelineBuildsByApplicationAndPipeline(db, application.ID, pip.ID, env.ID, 1, string(sdk.StatusSuccess), "")
+	pbs, err := pipeline.LoadPipelineBuildsByApplicationAndPipeline(db, app.ID, pip.ID, env.ID, 1, string(sdk.StatusSuccess), "")
 	if err != nil {
 		log.Warning("getPipelineCommitsHandler> Cannot load pipeline build %s: \n", err)
 		return err
@@ -1387,19 +1296,19 @@ func getPipelineCommitsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 
 	}
 
-	b, e := repositoriesmanager.CheckApplicationIsAttached(db, application.RepositoriesManager.Name, projectKey, appName)
+	b, e := repositoriesmanager.CheckApplicationIsAttached(db, app.RepositoriesManager.Name, projectKey, appName)
 	if e != nil {
-		log.Warning("getPipelineCommitsHandler> Cannot check app (%s,%s,%s): %s", application.RepositoriesManager.Name, projectKey, appName, e)
+		log.Warning("getPipelineCommitsHandler> Cannot check app (%s,%s,%s): %s", app.RepositoriesManager.Name, projectKey, appName, e)
 		return e
 	}
 
-	if !b && application.RepositoryFullname == "" {
+	if !b && app.RepositoryFullname == "" {
 		log.Warning("getPipelineCommitsHandler> No repository on the application %s", appName)
 		return WriteJSON(w, r, commits, http.StatusOK)
 	}
 
 	//Get the RepositoriesManager Client
-	client, err := repositoriesmanager.AuthorizedClient(db, projectKey, application.RepositoriesManager.Name)
+	client, err := repositoriesmanager.AuthorizedClient(db, projectKey, app.RepositoriesManager.Name)
 	if err != nil {
 		log.Warning("getPipelineCommitsHandler> Cannot get client: %s", err)
 		return sdk.ErrNoReposManagerClientAuth
@@ -1411,7 +1320,7 @@ func getPipelineCommitsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 	}
 
 	//If we are lucky, return a true diff
-	commits, err = client.Commits(application.RepositoryFullname, pbs[0].Trigger.VCSChangesBranch, pbs[0].Trigger.VCSChangesHash, hash)
+	commits, err = client.Commits(app.RepositoryFullname, pbs[0].Trigger.VCSChangesBranch, pbs[0].Trigger.VCSChangesHash, hash)
 	if err != nil {
 		log.Warning("getPipelineBuildCommitsHandler> Cannot get commits: %s", err)
 		return err
@@ -1457,40 +1366,37 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 				log.Warning("getPipelineBuildCommitsHandler> Cannot load environment %s: %s\n", envName, err)
 			}
 			return err
-
 		}
 	}
 
 	if !permission.AccessToEnvironment(env.ID, c.User, permission.PermissionRead) {
 		log.Warning("getPipelineHistoryHandler> No enought right on this environment %s: \n", envName)
 		return sdk.ErrForbidden
-
 	}
 
 	//Load the application
-	application, err := application.LoadApplicationByName(db, projectKey, appName)
+	app, err := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithRepositoryManager)
 	if err != nil {
 		return sdk.ErrApplicationNotFound
-
 	}
 
 	//Check it the application is attached to a repository
-	if application.RepositoriesManager == nil {
+	if app.RepositoriesManager == nil {
 		return sdk.ErrNoReposManagerClientAuth
 	}
 
-	b, e := repositoriesmanager.CheckApplicationIsAttached(db, application.RepositoriesManager.Name, projectKey, appName)
+	b, e := repositoriesmanager.CheckApplicationIsAttached(db, app.RepositoriesManager.Name, projectKey, appName)
 	if e != nil {
-		log.Warning("getPipelineBuildCommitsHandler> Cannot check app (%s,%s,%s): %s", application.RepositoriesManager.Name, projectKey, appName, e)
+		log.Warning("getPipelineBuildCommitsHandler> Cannot check app (%s,%s,%s): %s", app.RepositoriesManager.Name, projectKey, appName, e)
 		return e
 	}
 
-	if !b && application.RepositoryFullname == "" {
+	if !b && app.RepositoryFullname == "" {
 		return sdk.ErrNoReposManagerClientAuth
 	}
 
 	//Get the RepositoriesManager Client
-	client, err := repositoriesmanager.AuthorizedClient(db, projectKey, application.RepositoriesManager.Name)
+	client, err := repositoriesmanager.AuthorizedClient(db, projectKey, app.RepositoriesManager.Name)
 	if err != nil {
 		log.Warning("getPipelineBuildCommitsHandler> Cannot get client: %s", err)
 		return sdk.ErrNoReposManagerClientAuth
@@ -1498,10 +1404,10 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 
 	//Get the commit hash for the pipeline build number and the hash for the previous pipeline build for the same branch
 	//buildNumber, pipelineID, applicationID, environmentID
-	cur, prev, err := pipeline.CurrentAndPreviousPipelineBuildNumberAndHash(db, int64(buildNumber), pip.ID, application.ID, env.ID)
+	cur, prev, err := pipeline.CurrentAndPreviousPipelineBuildNumberAndHash(db, int64(buildNumber), pip.ID, app.ID, env.ID)
 
 	if err != nil {
-		log.Warning("getPipelineBuildCommitsHandler> Cannot get build number and hashes (buildNumber=%d, pipelineID=%d, applicationID=%d, envID=%d)  : %s ", buildNumber, pip.ID, application.ID, env.ID, err)
+		log.Warning("getPipelineBuildCommitsHandler> Cannot get build number and hashes (buildNumber=%d, pipelineID=%d, applicationID=%d, envID=%d)  : %s ", buildNumber, pip.ID, app.ID, env.ID, err)
 		return err
 	}
 
@@ -1519,7 +1425,7 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 
 	if prev != nil && cur.Hash != "" && prev.Hash != "" {
 		//If we are lucky, return a true diff
-		commits, err := client.Commits(application.RepositoryFullname, cur.Branch, prev.Hash, cur.Hash)
+		commits, err := client.Commits(app.RepositoryFullname, cur.Branch, prev.Hash, cur.Hash)
 		if err != nil {
 			log.Warning("getPipelineBuildCommitsHandler> Cannot get commits: %s", err)
 			return err
@@ -1532,7 +1438,7 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 	if cur.Hash != "" {
 		//If we only get current pipeline build hash
 		log.Info("getPipelineBuildCommitsHandler>  Looking for every commit until %s ", cur.Hash)
-		c, err := client.Commits(application.RepositoryFullname, cur.Branch, "", cur.Hash)
+		c, err := client.Commits(app.RepositoryFullname, cur.Branch, "", cur.Hash)
 		if err != nil {
 			log.Warning("getPipelineBuildCommitsHandler> Cannot get commits: %s", err)
 			return err
@@ -1542,7 +1448,7 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 	}
 
 	//If we only have the current branch, search for the branch
-	br, err := client.Branch(application.RepositoryFullname, cur.Branch)
+	br, err := client.Branch(app.RepositoryFullname, cur.Branch)
 	if err != nil {
 		log.Warning("getPipelineBuildCommitsHandler> Cannot get branch: %s", err)
 		return err
@@ -1554,7 +1460,7 @@ func getPipelineBuildCommitsHandler(w http.ResponseWriter, r *http.Request, db *
 	}
 	//and return the last commit of the branch
 	log.Debug("get the last commit : %s", br.LatestCommit)
-	cm, err := client.Commit(application.RepositoryFullname, br.LatestCommit)
+	cm, err := client.Commit(app.RepositoryFullname, br.LatestCommit)
 	if err != nil {
 		log.Warning("getPipelineBuildCommitsHandler> Cannot get commits: %s", err)
 		return err

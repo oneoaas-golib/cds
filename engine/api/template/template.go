@@ -80,13 +80,11 @@ func ApplyTemplate(db *gorp.DbMap, proj *sdk.Project, opts sdk.ApplyTemplatesOpt
 		return msgList, err
 	}
 
-	lastModified, errProj := project.UpdateProjectDB(tx, proj.Key, proj.Name)
-	if errProj != nil {
+	if errProj := project.UpdateLastModified(tx, user, proj); errProj != nil {
 		log.Warning("ApplyTemplate> cannot update project last modified date : %s", errProj)
 		close(msgChan)
 		return msgList, errProj
 	}
-	proj.LastModified = lastModified
 
 	close(msgChan)
 	<-done
@@ -154,7 +152,7 @@ func ApplyTemplateOnApplication(db *gorp.DbMap, proj *sdk.Project, app *sdk.Appl
 	}(&msgList)
 
 	//Import the pipelines
-	if err := application.ImportPipelines(tx, proj, app, msgChan); err != nil {
+	if err := application.ImportPipelines(tx, proj, app, user, msgChan); err != nil {
 		log.Warning("ApplyTemplateOnApplication> error applying template : %s", err)
 		close(msgChan)
 		return msgList, err

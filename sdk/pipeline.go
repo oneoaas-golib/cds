@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+	"github.com/runabove/venom"
 )
 
 // Pipeline represents the complete behavior of CDS for each projects
@@ -44,7 +45,7 @@ type PipelineBuild struct {
 	Environment Environment `json:"environment"`
 
 	Artifacts             []Artifact           `json:"artifacts,omitempty"`
-	Tests                 *Tests               `json:"tests,omitempty"`
+	Tests                 *venom.Tests         `json:"tests,omitempty"`
 	Commits               []VCSCommit          `json:"commits,omitempty"`
 	Trigger               PipelineBuildTrigger `json:"trigger"`
 	PreviousPipelineBuild *PipelineBuild       `json:"previous_pipeline_build"`

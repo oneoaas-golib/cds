@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/go-gorp/gorp"
@@ -52,13 +50,10 @@ func deleteGroupFromProjectHandler(w http.ResponseWriter, r *http.Request, db *g
 		return err
 
 	}
-	lastModified, err := project.UpdateProjectDB(db, p.Key, p.Name)
-	if err != nil {
-		log.Warning("deleteGroupFromProjectHandler: Cannot update project last modified date: %s\n", err)
+	if err := project.UpdateLastModified(tx, c.User, p); err != nil {
+		log.Warning("deleteGroupFromProjectHandler: Cannot update last modified date: %s\n", err)
 		return err
-
 	}
-	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("deleteGroupFromProjectHandler: Cannot commit transaction:  %s\n", err)
@@ -81,17 +76,9 @@ func updateGroupRoleOnProjectHandler(w http.ResponseWriter, r *http.Request, db 
 	key := vars["permProjectKey"]
 	groupName := vars["group"]
 
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-
-	}
-
 	var groupProject sdk.GroupPermission
-	if err := json.Unmarshal(data, &groupProject); err != nil {
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &groupProject); err != nil {
+		return err
 	}
 
 	if groupName != groupProject.Group.Name {
@@ -154,13 +141,10 @@ func updateGroupRoleOnProjectHandler(w http.ResponseWriter, r *http.Request, db 
 
 	}
 
-	lastModified, err := project.UpdateProjectDB(db, p.Key, p.Name)
-	if err != nil {
-		log.Warning("updateGroupRoleHandler: Cannot update project last modified date: %s\n", err)
+	if err := project.UpdateLastModified(tx, c.User, p); err != nil {
+		log.Warning("updateGroupRoleHandler: Cannot update last modified date: %s\n", err)
 		return err
-
 	}
-	p.LastModified = lastModified
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("updateGroupRoleHandler: Cannot start transaction: %s\n", err)
@@ -182,18 +166,9 @@ func updateGroupsInProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMa
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
 
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-
-	}
-
 	var groupProject []sdk.GroupPermission
-	err = json.Unmarshal(data, &groupProject)
-	if err != nil {
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &groupProject); err != nil {
+		return err
 	}
 
 	if len(groupProject) == 0 {
@@ -264,22 +239,13 @@ func updateGroupsInProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMa
 }
 
 func addGroupInProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
-
 	// Get project name in URL
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
 
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		return sdk.ErrWrongRequest
-
-	}
-
 	var groupProject sdk.GroupPermission
-	if err := json.Unmarshal(data, &groupProject); err != nil {
-		return sdk.ErrWrongRequest
-
+	if err := UnmarshalBody(r, &groupProject); err != nil {
+		return err
 	}
 
 	p, err := project.Load(db, key, c.User)
@@ -322,107 +288,98 @@ func addGroupInProject(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c
 
 	}
 
-	// recursive or not?
-	if groupProject.Recursive {
+	// apply on application
+	applications, err := application.LoadAll(db, p.Key, c.User)
+	if err != nil {
+		log.Warning("AddGroupInProject: Cannot load applications for project %s:  %s\n", p.Name, err)
+		return err
+	}
 
-		// apply on application
-		applications, err := application.LoadApplications(tx, p.Key, false, false, c.User)
-		if err != nil {
-			log.Warning("AddGroupInProject: Cannot load applications for project %s:  %s\n", p.Name, err)
-			return err
+	for _, app := range applications {
+		if permission.AccessToApplication(app.ID, c.User, permission.PermissionReadWriteExecute) {
+			inApp, err := group.CheckGroupInApplication(tx, app.ID, g.ID)
+			if err != nil {
+				log.Warning("AddGroupInProject: Cannot check if group %s is already in the application %s: %s\n", g.Name, app.Name, err)
+				return err
 
-		}
-
-		for _, app := range applications {
-			if permission.AccessToApplication(app.ID, c.User, permission.PermissionReadWriteExecute) {
-				inApp, err := group.CheckGroupInApplication(tx, app.ID, g.ID)
-				if err != nil {
-					log.Warning("AddGroupInProject: Cannot check if group %s is already in the application %s: %s\n", g.Name, app.Name, err)
-					return err
-
-				}
-				if inApp {
-					if err := group.UpdateGroupRoleInApplication(tx, p.Key, app.Name, g.Name, groupProject.Permission); err != nil {
-						log.Warning("AddGroupInProject: Cannot update group %s on application %s: %s\n", g.Name, app.Name, err)
-						return err
-
-					}
-				} else if err := group.InsertGroupInApplication(tx, app.ID, g.ID, groupProject.Permission); err != nil {
-					log.Warning("AddGroupInProject: Cannot insert group %s on application %s: %s\n", g.Name, app.Name, err)
-					return err
-
-				}
 			}
-		}
-
-		// apply on pipeline
-		pipelines, err := pipeline.LoadPipelines(tx, p.ID, false, c.User)
-		if err != nil {
-			log.Warning("AddGroupInProject: Cannot load pipelines for project %s:  %s\n", p.Name, err)
-			return err
-
-		}
-
-		for _, pip := range pipelines {
-			if permission.AccessToPipeline(sdk.DefaultEnv.ID, pip.ID, c.User, permission.PermissionReadWriteExecute) {
-				inPip, err := group.CheckGroupInPipeline(tx, pip.ID, g.ID)
-				if err != nil {
-					log.Warning("AddGroupInProject: Cannot check if group %s is already in the pipeline %s: %s\n", g.Name, pip.Name, err)
+			if inApp {
+				if err := group.UpdateGroupRoleInApplication(tx, p.Key, app.Name, g.Name, groupProject.Permission); err != nil {
+					log.Warning("AddGroupInProject: Cannot update group %s on application %s: %s\n", g.Name, app.Name, err)
 					return err
 
 				}
-				if inPip {
-					if err := group.UpdateGroupRoleInPipeline(tx, pip.ID, g.ID, groupProject.Permission); err != nil {
-						log.Warning("AddGroupInProject: Cannot update group %s on pipeline %s: %s\n", g.Name, pip.Name, err)
-						return err
-
-					}
-				} else if err := group.InsertGroupInPipeline(tx, pip.ID, g.ID, groupProject.Permission); err != nil {
-					log.Warning("AddGroupInProject: Cannot insert group %s on pipeline %s: %s\n", g.Name, pip.Name, err)
-					return err
-
-				}
-			}
-		}
-
-		// apply on environment
-		envs, err := environment.LoadEnvironments(tx, p.Key, false, c.User)
-		if err != nil {
-			log.Warning("AddGroupInProject: Cannot load environments for project %s:  %s\n", p.Name, err)
-			return err
-
-		}
-
-		for _, env := range envs {
-			if permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadWriteExecute) {
-				inEnv, err := group.IsInEnvironment(tx, env.ID, g.ID)
-				if err != nil {
-					log.Warning("AddGroupInProject: Cannot check if group %s is already in the environment %s: %s\n", g.Name, env.Name, err)
-					return err
-
-				}
-				if inEnv {
-					if err := group.UpdateGroupRoleInEnvironment(tx, p.Key, env.Name, g.Name, groupProject.Permission); err != nil {
-						log.Warning("AddGroupInProject: Cannot update group %s on environment %s: %s\n", g.Name, env.Name, err)
-						return err
-
-					}
-				} else if err := group.InsertGroupInEnvironment(tx, env.ID, g.ID, groupProject.Permission); err != nil {
-					log.Warning("AddGroupInProject: Cannot insert group %s on environment %s: %s\n", g.Name, env.Name, err)
-					return err
-
-				}
+			} else if err := application.AddGroup(db, p, &app, groupProject); err != nil {
+				log.Warning("AddGroupInProject: Cannot insert group %s on application %s: %s\n", g.Name, app.Name, err)
+				return err
 			}
 		}
 	}
 
-	lastModified, err := project.UpdateProjectDB(db, p.Key, p.Name)
+	// apply on pipeline
+	pipelines, err := pipeline.LoadPipelines(tx, p.ID, false, c.User)
 	if err != nil {
-		log.Warning("AddGroupInProject: Cannot update project last modified date: %s\n", err)
+		log.Warning("AddGroupInProject: Cannot load pipelines for project %s:  %s\n", p.Name, err)
 		return err
 
 	}
-	p.LastModified = lastModified
+
+	for _, pip := range pipelines {
+		if permission.AccessToPipeline(sdk.DefaultEnv.ID, pip.ID, c.User, permission.PermissionReadWriteExecute) {
+			inPip, err := group.CheckGroupInPipeline(tx, pip.ID, g.ID)
+			if err != nil {
+				log.Warning("AddGroupInProject: Cannot check if group %s is already in the pipeline %s: %s\n", g.Name, pip.Name, err)
+				return err
+
+			}
+			if inPip {
+				if err := group.UpdateGroupRoleInPipeline(tx, pip.ID, g.ID, groupProject.Permission); err != nil {
+					log.Warning("AddGroupInProject: Cannot update group %s on pipeline %s: %s\n", g.Name, pip.Name, err)
+					return err
+
+				}
+			} else if err := group.InsertGroupInPipeline(tx, pip.ID, g.ID, groupProject.Permission); err != nil {
+				log.Warning("AddGroupInProject: Cannot insert group %s on pipeline %s: %s\n", g.Name, pip.Name, err)
+				return err
+
+			}
+		}
+	}
+
+	// apply on environment
+	envs, err := environment.LoadEnvironments(tx, p.Key, false, c.User)
+	if err != nil {
+		log.Warning("AddGroupInProject: Cannot load environments for project %s:  %s\n", p.Name, err)
+		return err
+
+	}
+
+	for _, env := range envs {
+		if permission.AccessToEnvironment(env.ID, c.User, permission.PermissionReadWriteExecute) {
+			inEnv, err := group.IsInEnvironment(tx, env.ID, g.ID)
+			if err != nil {
+				log.Warning("AddGroupInProject: Cannot check if group %s is already in the environment %s: %s\n", g.Name, env.Name, err)
+				return err
+
+			}
+			if inEnv {
+				if err := group.UpdateGroupRoleInEnvironment(tx, p.Key, env.Name, g.Name, groupProject.Permission); err != nil {
+					log.Warning("AddGroupInProject: Cannot update group %s on environment %s: %s\n", g.Name, env.Name, err)
+					return err
+
+				}
+			} else if err := group.InsertGroupInEnvironment(tx, env.ID, g.ID, groupProject.Permission); err != nil {
+				log.Warning("AddGroupInProject: Cannot insert group %s on environment %s: %s\n", g.Name, env.Name, err)
+				return err
+
+			}
+		}
+	}
+
+	if err := project.UpdateLastModified(tx, c.User, p); err != nil {
+		log.Warning("AddGroupInProject: Cannot update last modified date: %s\n", err)
+		return err
+	}
 
 	if err := tx.Commit(); err != nil {
 		log.Warning("AddGroupInProject: Cannot commit transaction:  %s\n", err)

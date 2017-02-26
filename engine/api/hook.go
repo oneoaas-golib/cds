@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -62,27 +61,14 @@ func receiveHook(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 }
 
 func addHook(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("addHook: Cannot read body: %s\n", err)
-		return err
-
-	}
-
 	var h sdk.Hook
-	err = json.Unmarshal(data, &h)
-	if err != nil {
-		log.Warning("addHook: Cannot unmarshal body: %s\n", err)
+	if err := UnmarshalBody(r, &h); err != nil {
 		return err
-
 	}
-
 	h.Enabled = true
 
 	// Insert hook in database
-	err = hook.InsertHook(db, &h)
-	if err != nil {
+	if err := hook.InsertHook(db, &h); err != nil {
 		log.Warning("addHook: cannot insert hook in db: %s\n", err)
 		return err
 
@@ -92,25 +78,13 @@ func addHook(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.
 }
 
 func updateHookHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
-
-	// Get body
-	data, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Warning("updateHookHandler: Cannot read body: %s\n", err)
-		return err
-
-	}
-
 	var h sdk.Hook
-	err = json.Unmarshal(data, &h)
-	if err != nil {
-		log.Warning("updateHookHandler: Cannot unmarshal body: %s\n", err)
+	if err := UnmarshalBody(r, &h); err != nil {
 		return err
 	}
 
 	// Update hook in database
-	err = hook.UpdateHook(db, h)
-	if err != nil {
+	if err := hook.UpdateHook(db, h); err != nil {
 		log.Warning("updateHookHandler: cannot update hook in db: %s\n", err)
 		return err
 	}
@@ -123,19 +97,13 @@ func getApplicationHooksHandler(w http.ResponseWriter, r *http.Request, db *gorp
 	projectName := vars["key"]
 	appName := vars["permApplicationName"]
 
-	a, err := application.LoadApplicationByName(db, projectName, appName)
+	a, err := application.LoadByName(db, projectName, appName, c.User, application.LoadOptions.WithHooks)
 	if err != nil {
 		log.Warning("getApplicationHooksHandler> cannot load application %s/%s: %s\n", projectName, appName, err)
 		return err
 	}
 
-	hooks, err := hook.LoadApplicationHooks(db, a.ID)
-	if err != nil {
-		log.Warning("getApplicationHooksHandler> cannot load hooks: %s\n", err)
-		return err
-	}
-
-	return WriteJSON(w, r, hooks, http.StatusOK)
+	return WriteJSON(w, r, a.Hooks, http.StatusOK)
 }
 
 func getHooks(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
@@ -152,7 +120,7 @@ func getHooks(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context
 		return err
 	}
 
-	a, err := application.LoadApplicationByName(db, projectName, appName)
+	a, err := application.LoadByName(db, projectName, appName, c.User)
 	if err != nil {
 		log.Warning("getHooks> cannot load application %s/%s: %s\n", projectName, appName, err)
 		return err
@@ -264,7 +232,7 @@ func processHook(db *gorp.DbMap, h hook.ReceivedHook) error {
 
 		// get Project
 		// Load project
-		projectData, err := project.LoadProjectByPipelineID(tx, p.ID)
+		projectData, err := project.LoadByPipelineID(tx, nil, p.ID)
 		if err != nil {
 			log.Warning("processHook> Cannot load project for pipeline %s: %s\n", p.Name, err)
 			return err

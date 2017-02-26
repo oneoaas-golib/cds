@@ -74,13 +74,37 @@ func RemoveProject(key string) error {
 	return nil
 }
 
+// UpdateProject call API to update project
+func UpdateProject(proj *Project) error {
+	data, err := json.Marshal(proj)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("/project/%s", proj.Key)
+	data, code, err := Request("PUT", url, data)
+	if err != nil {
+		return err
+	}
+
+	if code != http.StatusCreated && code != http.StatusOK {
+		return fmt.Errorf("Error [%d]: %s", code, data)
+	}
+	e := DecodeError(data)
+	if e != nil {
+		return e
+	}
+
+	return nil
+}
+
 // RenameProject call API to update project
 func RenameProject(key, newName string) error {
 
 	p := NewProject(key)
 	p.Name = newName
 
-	data, err := json.MarshalIndent(p, " ", " ")
+	data, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
@@ -198,7 +222,7 @@ func UpdateGroupInProject(projectKey, groupname string, permission int) error {
 }
 
 // AddGroupInProject  add a group in a project
-func AddGroupInProject(projectKey, groupname string, permission int, recursive bool) error {
+func AddGroupInProject(projectKey, groupname string, permission int) error {
 
 	if permission < 4 || permission > 7 {
 		return fmt.Errorf("Permission should be between 4-7 \n")
@@ -209,7 +233,6 @@ func AddGroupInProject(projectKey, groupname string, permission int, recursive b
 			Name: groupname,
 		},
 		Permission: permission,
-		Recursive:  recursive,
 	}
 
 	data, err := json.MarshalIndent(groupProject, " ", " ")
