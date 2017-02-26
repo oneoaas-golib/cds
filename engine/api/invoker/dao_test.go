@@ -156,9 +156,10 @@ func TestInsert(t *testing.T) {
 		ProjectID: proj.ID,
 	}
 
-	test.NoError(t, application.InsertApplication(db, proj, app))
+	test.NoError(t, application.Insert(db, proj, app))
 	test.NoError(t, pipeline.InsertPipeline(db, pip))
-	test.NoError(t, application.AttachPipeline(db, app.ID, pip.ID))
+	_, err := application.AttachPipeline(db, app.ID, pip.ID)
+	test.NoError(t, err)
 
 	i := sdk.PipelineInvoker{
 		Type:          pit,

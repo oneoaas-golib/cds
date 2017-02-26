@@ -76,7 +76,7 @@ func Load(db gorp.SqlExecutor, uuid string) (*sdk.PipelineInvoker, error) {
 
 //PostGet is a DB hook
 func (e *PipelineInvoker) PostGet(db gorp.SqlExecutor) error {
-	app, err := application.LoadApplicationByID(db, e.ApplicationID)
+	app, err := application.LoadByID(db, e.ApplicationID, nil)
 	if err != nil {
 		log.Warning("source.PostGest> Unable load application %d: %s", e.ApplicationID, err)
 		return err
