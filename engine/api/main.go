@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/pkg/namesgenerator"
 	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
@@ -209,7 +210,15 @@ var mainCmd = &cobra.Command{
 			Password:        viper.GetString("event_kafka_password"),
 			Topic:           viper.GetString("event_kafka_topic"),
 		}
-		if err := event.Initialize(kafkaOptions); err != nil {
+
+		hostname, err := os.Hostname()
+		if err != nil {
+			log.Warning("Error while getting Hostname: %s", err.Error())
+			hostname = "localhost"
+		}
+		cdsname := namesgenerator.GetRandomName(0)
+
+		if err := event.Initialize(kafkaOptions, hostname, cdsname); err != nil {
 			log.Warning("⚠ Error while initializing event system: %s", err)
 		} else {
 			go event.DequeueEvent()

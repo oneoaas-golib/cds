@@ -2,9 +2,6 @@ package event
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/docker/docker/pkg/namesgenerator"
 
 	"github.com/ovh/cds/engine/api/cache"
 	"github.com/ovh/cds/engine/log"
@@ -33,13 +30,9 @@ func getBroker(t string, option interface{}) (Broker, error) {
 }
 
 // Initialize initializes event system
-func Initialize(k KafkaConfig) error {
-	var err error
-	hostname, err = os.Hostname()
-	if err != nil {
-		hostname = fmt.Sprintf("Error while getting Hostname: %s", err.Error())
-	}
-	cdsname = namesgenerator.GetRandomName(0)
+func Initialize(k KafkaConfig, h, cds string) error {
+	hostname = h
+	cdsname = cds
 
 	brokers = []Broker{}
 	if k.Enabled {
