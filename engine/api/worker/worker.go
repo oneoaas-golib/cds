@@ -16,7 +16,7 @@ import (
 	"github.com/ovh/cds/sdk"
 )
 
-// PipelineBuildJobInfo is returned to worker in answer to takeActionBuildHandler
+// PipelineBuildJobInfo is returned to worker in answer to takePipelineBuildJobHandler
 type PipelineBuildJobInfo struct {
 	PipelineBuildJob sdk.PipelineBuildJob
 	Secrets          []sdk.Variable
@@ -29,32 +29,29 @@ var ErrNoWorker = fmt.Errorf("cds: no worker found")
 
 // DeleteWorker remove worker from database
 func DeleteWorker(db *gorp.DbMap, id string) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("DeleteWorker> Cannot start tx: %s\n", err)
+	tx, errb := db.Begin()
+	if errb != nil {
+		return fmt.Errorf("DeleteWorker> Cannot start tx: %s\n", errb)
 	}
 	defer tx.Rollback()
 
 	query := `SELECT name, status, action_build_id FROM worker WHERE id = $1 FOR UPDATE`
 	var st, name string
 	var pbJobID sql.NullInt64
-	err = tx.QueryRow(query, id).Scan(&name, &st, &pbJobID)
-	if err != nil {
+	if err := tx.QueryRow(query, id).Scan(&name, &st, &pbJobID); err != nil {
 		log.Info("DeleteWorker[%d]> Cannot lock worker: %s\n", id, err)
 		return nil
 	}
 
 	if st == sdk.StatusBuilding.String() {
-		// AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHH
 		// Worker is awol while building !
-		// We need to restart this action before anyone notice
+		// We need to restart this action
 		if pbJobID.Valid == false {
 			return fmt.Errorf("DeleteWorker> Meh, worker %s crashed while building but action_build_id is NULL!\n", name)
 		}
 
 		log.Notice("Worker %s crashed while building %d !\n", name, pbJobID.Int64)
-		err = pipeline.RestartPipelineBuildJob(tx, pbJobID.Int64)
-		if err != nil {
+		if err := pipeline.RestartPipelineBuildJob(tx, pbJobID.Int64); err != nil {
 			log.Critical("DeleteWorker[%d]> Cannot restart pipeline build job: %s\n", id, err)
 		} else {
 			log.Notice("DeleteWorker[%d]> PipelineBuildJob %d restarted after crash\n", id, pbJobID.Int64)
@@ -63,13 +60,11 @@ func DeleteWorker(db *gorp.DbMap, id string) error {
 
 	// Well then, let's remove this loser
 	query = `DELETE FROM worker WHERE id = $1`
-	_, err = tx.Exec(query, id)
-	if err != nil {
+	if _, err := tx.Exec(query, id); err != nil {
 		return err
 	}
 
-	err = tx.Commit()
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
@@ -193,7 +188,7 @@ func LoadDeadWorkers(db gorp.SqlExecutor, timeout float64) ([]sdk.Worker, error)
 	var w []sdk.Worker
 	var statusS string
 	query := `	SELECT id, name, last_beat, group_id, model, status, hatchery_id
-				FROM worker 
+				FROM worker
 				WHERE 1 = 1
 				AND now() - last_beat > $1 * INTERVAL '1' SECOND
 				ORDER BY name ASC
@@ -262,6 +257,12 @@ type RegistrationForm struct {
 	Hatchery           int64
 	BinaryCapabilities []string
 	Version            string
+}
+
+// TakeForm contains booked JobID if exists
+type TakeForm struct {
+	BookedJobID int64
+	Time        time.Time
 }
 
 // RegisterWorker  Register new worker
@@ -417,6 +418,28 @@ func SetToBuilding(db gorp.SqlExecutor, workerID string, actionBuildID int64) er
 
 	_, err := res.RowsAffected()
 	return err
+}
+
+// LoadWorkerModelsUsableOnGroup returns worker models for a group
+func LoadWorkerModelsUsableOnGroup(db gorp.SqlExecutor, groupID, sharedinfraGroupID int64) ([]sdk.Model, error) {
+	ms := []WorkerModel{}
+	if _, err := db.Select(&ms, `
+		select * from worker_model
+		where group_id = $1
+		or group_id = $2
+		or $1 = $2
+		order by name
+		`, groupID, sharedinfraGroupID); err != nil {
+		return nil, err
+	}
+	models := []sdk.Model{}
+	for i := range ms {
+		if err := ms[i].PostSelect(db); err != nil {
+			return nil, err
+		}
+		models = append(models, sdk.Model(ms[i]))
+	}
+	return models, nil
 }
 
 // UpdateWorkerStatus changes worker status to Disabled

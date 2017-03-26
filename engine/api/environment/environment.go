@@ -10,6 +10,7 @@ import (
 
 	"github.com/ovh/cds/engine/api/artifact"
 	"github.com/ovh/cds/engine/api/keys"
+	"github.com/ovh/cds/engine/api/permission"
 	"github.com/ovh/cds/engine/log"
 	"github.com/ovh/cds/sdk"
 )
@@ -55,6 +56,8 @@ func LoadEnvironments(db gorp.SqlExecutor, projectKey string, loadDeps bool, use
 		if err != nil {
 			return envs, err
 		}
+		env.Permission = permission.EnvironmentPermission(env.ID, user)
+
 		envs = append(envs, env)
 	}
 	rows.Close()
@@ -73,8 +76,8 @@ func LoadEnvironments(db gorp.SqlExecutor, projectKey string, loadDeps bool, use
 // Lock locks an environment given its ID
 func Lock(db gorp.SqlExecutor, projectKey, envName string) error {
 	_, err := db.Exec(`
-	SELECT * 
-	FROM environment 
+	SELECT *
+	FROM environment
 	WHERE id in (
 		SELECT environment.id FROM environment
 		JOIN project ON project.id = environment.project_id
@@ -199,18 +202,15 @@ func UpdateEnvironment(db gorp.SqlExecutor, environment *sdk.Environment) error 
 
 // DeleteEnvironment Delete the given environment
 func DeleteEnvironment(db gorp.SqlExecutor, environmentID int64) error {
-
 	// Delete variables
-	err := DeleteAllVariable(db, environmentID)
-	if err != nil {
+	if err := DeleteAllVariable(db, environmentID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment variable: %s\n", err)
 		return err
 	}
 
 	// Delete groups
 	query := `DELETE FROM environment_group WHERE environment_id = $1`
-	_, err = db.Exec(query, environmentID)
-	if err != nil {
+	if _, err := db.Exec(query, environmentID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment gorup: %s\n", err)
 		return err
 	}
@@ -219,98 +219,93 @@ func DeleteEnvironment(db gorp.SqlExecutor, environmentID int64) error {
 	query = `DELETE FROM pipeline_build_log where pipeline_build_id IN (
 			SELECT id FROM pipeline_build WHERE environment_id = $1
 		)`
-	_, err = db.Exec(query, environmentID)
-	if err != nil {
+
+	if _, err := db.Exec(query, environmentID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment related builds: %s\n", err)
 		return err
 	}
 
 	query = `DELETE FROM pipeline_build_job WHERE pipeline_build_id
 			IN (SELECT id FROM pipeline_build WHERE environment_id = $1)`
-	_, err = db.Exec(query, environmentID)
-	if err != nil {
+
+	if _, err := db.Exec(query, environmentID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment related builds: %s\n", err)
 		return err
 	}
 
 	query = `DELETE FROM pipeline_build where environment_id = $1`
-	_, err = db.Exec(query, environmentID)
-	if err != nil {
+	if _, err := db.Exec(query, environmentID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment related builds: %s\n", err)
 		return err
 	}
 
-	// Delete artifacts related to this environments
-	query = `SELECT id FROM artifact where environment_id = $1`
-	rows, err := db.Query(query, environmentID)
-	if err != nil {
-		return fmt.Errorf("DeleteEnvironment> Cannot load related artifacts: %s", err)
-	}
-	defer rows.Close()
-	var ids []int64
-	var id int64
-	for rows.Next() {
-		err = rows.Scan(&id)
-		if err != nil {
-			return fmt.Errorf("DeleteEnvironment> cannot scan artifact id: %s", err)
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	for _, id := range ids {
-		err = artifact.DeleteArtifact(db, id)
-		if err != nil {
-			return fmt.Errorf("DeleteEnvironment> Cannot delete artifact: %s", err)
-		}
-	}
-
 	//Delete application_pipeline_notif to this environments
 	query = `DELETE FROM application_pipeline_notif WHERE environment_id = $1`
-	_, err = db.Exec(query, environmentID)
-	if err != nil {
+	if _, err := db.Exec(query, environmentID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment application_pipeline_notif: %s\n", err)
 		return err
 	}
 
 	// FINALY delete environment
 	query = `DELETE FROM environment WHERE id=$1`
-	_, err = db.Exec(query, environmentID)
-	if err != nil {
-		log.Warning("DeleteEnvironment> Cannot delete environment: %s\n", err)
-		return err
+	if _, err := db.Exec(query, environmentID); err != nil {
+		if err, ok := err.(*pq.Error); ok {
+			if err.Code.Name() == "foreign_key_violation" {
+				return sdk.WrapError(sdk.ErrEnvironmentCannotBeDeleted, "DeleteEnvironment> Cannot delete environment %d", environmentID)
+			}
+		}
+		return sdk.WrapError(err, "DeleteEnvironment> Cannot delete environment %d", environmentID)
 	}
+
+	// Delete artifacts related to this environments
+	query = `SELECT id FROM artifact where environment_id = $1`
+	rows, errq := db.Query(query, environmentID)
+	if errq != nil {
+		return fmt.Errorf("DeleteEnvironment> Cannot load related artifacts: %s", errq)
+	}
+	defer rows.Close()
+	var ids []int64
+	var id int64
+	for rows.Next() {
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("DeleteEnvironment> cannot scan artifact id: %s", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if err := artifact.DeleteArtifact(db, id); err != nil {
+			return fmt.Errorf("DeleteEnvironment> Cannot delete artifact: %s", err)
+		}
+	}
+
 	return nil
 }
 
 // DeleteAllEnvironment Delete all environment attached to the given project
 func DeleteAllEnvironment(db gorp.SqlExecutor, projectID int64) error {
-
 	query := `DELETE FROM environment_variable WHERE environment_id IN (SELECT id FROM environment WHERE project_id = $1)`
-	_, err := db.Exec(query, projectID)
-	if err != nil {
+	if _, err := db.Exec(query, projectID); err != nil {
 		log.Warning("DeleteAllEnvironment> Cannot delete environment variable: %s\n", err)
 		return err
 	}
 
 	// Delete groups
 	query = `DELETE FROM environment_group WHERE environment_id IN (SELECT id FROM environment WHERE project_id = $1)`
-	_, err = db.Exec(query, projectID)
-	if err != nil {
+	if _, err := db.Exec(query, projectID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment group: %s\n", err)
 		return err
 	}
 
 	//Delete application_pipeline_notif to this environments
 	query = `DELETE FROM application_pipeline_notif WHERE environment_id  IN (SELECT id FROM environment WHERE project_id = $1)`
-	_, err = db.Exec(query, projectID)
-	if err != nil {
+	if _, err := db.Exec(query, projectID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment application_pipeline_notif: %s\n", err)
 		return err
 	}
 
 	query = `DELETE FROM environment WHERE project_id=$1`
-	_, err = db.Exec(query, projectID)
-	if err != nil {
+	if _, err := db.Exec(query, projectID); err != nil {
 		log.Warning("DeleteEnvironment> Cannot delete environment: %s\n", err)
 		return err
 	}
@@ -383,7 +378,7 @@ func LoadEnvironmentByGroup(db gorp.SqlExecutor, group *sdk.Group) error {
 }
 
 // AddKeyPairToEnvironment generate a ssh key pair and add them as env variables
-func AddKeyPairToEnvironment(db gorp.SqlExecutor, envID int64, keyname string) error {
+func AddKeyPairToEnvironment(db gorp.SqlExecutor, envID int64, keyname string, u *sdk.User) error {
 	pub, priv, errGenerate := keys.Generatekeypair(keyname)
 	if errGenerate != nil {
 		return errGenerate
@@ -395,7 +390,7 @@ func AddKeyPairToEnvironment(db gorp.SqlExecutor, envID int64, keyname string) e
 		Value: priv,
 	}
 
-	if err := InsertVariable(db, envID, v); err != nil {
+	if err := InsertVariable(db, envID, v, u); err != nil {
 		return err
 	}
 
@@ -405,5 +400,5 @@ func AddKeyPairToEnvironment(db gorp.SqlExecutor, envID int64, keyname string) e
 		Value: pub,
 	}
 
-	return InsertVariable(db, envID, p)
+	return InsertVariable(db, envID, p, u)
 }

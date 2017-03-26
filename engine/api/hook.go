@@ -16,6 +16,7 @@ import (
 	"github.com/ovh/cds/engine/api/hook"
 	"github.com/ovh/cds/engine/api/pipeline"
 	"github.com/ovh/cds/engine/api/project"
+	"github.com/ovh/cds/engine/api/workflow"
 	"github.com/ovh/cds/engine/log"
 	"github.com/ovh/cds/sdk"
 )
@@ -61,6 +62,10 @@ func receiveHook(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *cont
 }
 
 func addHook(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
+	vars := mux.Vars(r)
+	projectKey := vars["key"]
+	appName := vars["permApplicationName"]
+
 	var h sdk.Hook
 	if err := UnmarshalBody(r, &h); err != nil {
 		return err
@@ -74,22 +79,58 @@ func addHook(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.
 
 	}
 
-	return WriteJSON(w, r, h, http.StatusOK)
+	app, errA := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithHooks)
+	if errA != nil {
+		return sdk.WrapError(errA, "addHook: Cannot load application")
+	}
+	var errW error
+	app.Workflows, errW = workflow.LoadCDTree(db, projectKey, appName, c.User)
+	if errW != nil {
+		return sdk.WrapError(errA, "addHook: Cannot load workflow")
+	}
+
+	return WriteJSON(w, r, app, http.StatusOK)
 }
 
 func updateHookHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
+	vars := mux.Vars(r)
+	projectKey := vars["key"]
+	appName := vars["permApplicationName"]
+
 	var h sdk.Hook
 	if err := UnmarshalBody(r, &h); err != nil {
-		return err
+		return sdk.WrapError(err, "updateHookHandler")
+	}
+
+	app, errA := application.LoadByName(db, projectKey, appName, c.User, application.LoadOptions.WithHooks)
+	if errA != nil {
+		return sdk.WrapError(errA, "updateHookHandler> Cannot load application")
+	}
+
+	found := false
+	for _, hookInApp := range app.Hooks {
+		if hookInApp.ID == h.ID {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return sdk.WrapError(sdk.ErrNoHook, "updateHookHandler")
 	}
 
 	// Update hook in database
 	if err := hook.UpdateHook(db, h); err != nil {
-		log.Warning("updateHookHandler: cannot update hook in db: %s\n", err)
-		return err
+		return sdk.WrapError(err, "updateHookHandler: cannot update hook")
 	}
 
-	return nil
+	var errW error
+	app.Workflows, errW = workflow.LoadCDTree(db, projectKey, app.Name, c.User)
+	if errW != nil {
+		return sdk.WrapError(errW, "updateHookHandler: Cannot load workflow")
+	}
+
+	return WriteJSON(w, r, app, http.StatusOK)
 }
 
 func getApplicationHooksHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
@@ -97,19 +138,13 @@ func getApplicationHooksHandler(w http.ResponseWriter, r *http.Request, db *gorp
 	projectName := vars["key"]
 	appName := vars["permApplicationName"]
 
-	a, err := application.LoadApplicationByName(db, projectName, appName)
+	a, err := application.LoadByName(db, projectName, appName, c.User, application.LoadOptions.WithHooks)
 	if err != nil {
 		log.Warning("getApplicationHooksHandler> cannot load application %s/%s: %s\n", projectName, appName, err)
 		return err
 	}
 
-	hooks, err := hook.LoadApplicationHooks(db, a.ID)
-	if err != nil {
-		log.Warning("getApplicationHooksHandler> cannot load hooks: %s\n", err)
-		return err
-	}
-
-	return WriteJSON(w, r, hooks, http.StatusOK)
+	return WriteJSON(w, r, a.Hooks, http.StatusOK)
 }
 
 func getHooks(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context.Ctx) error {
@@ -126,7 +161,7 @@ func getHooks(w http.ResponseWriter, r *http.Request, db *gorp.DbMap, c *context
 		return err
 	}
 
-	a, err := application.LoadApplicationByName(db, projectName, appName)
+	a, err := application.LoadByName(db, projectName, appName, c.User)
 	if err != nil {
 		log.Warning("getHooks> cannot load application %s/%s: %s\n", projectName, appName, err)
 		return err

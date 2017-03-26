@@ -52,7 +52,7 @@ func updateEnvironmentsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
 
-	proj, err := project.Load(db, key, c.User)
+	proj, err := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if err != nil {
 		log.Warning("updateEnvironmentsHandler: Cannot load %s: %s\n", key, err)
 		return err
@@ -166,7 +166,7 @@ func updateEnvironmentsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 					log.Warning("updateEnvironmentsHandler> %s (%s)\n", errMsg, c.User.Username)
 					return sdk.NewError(sdk.ErrInvalidSecretValue, fmt.Errorf("%s", errMsg))
 				}
-				err = environment.InsertVariable(tx, env.ID, varEnv)
+				err = environment.InsertVariable(tx, env.ID, varEnv, c.User)
 				if err != nil {
 					log.Warning("updateEnvironmentsHandler> Cannot insert variables on environments: %s\n", err)
 					return err
@@ -177,7 +177,7 @@ func updateEnvironmentsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 				break
 			case sdk.KeyVariable:
 				if varEnv.Value == "" {
-					err := environment.AddKeyPairToEnvironment(tx, env.ID, varEnv.Name)
+					err := environment.AddKeyPairToEnvironment(tx, env.ID, varEnv.Name, c.User)
 					if err != nil {
 						log.Warning("updateEnvironmentsHandler> cannot generate keypair: %s\n", err)
 						return err
@@ -188,7 +188,7 @@ func updateEnvironmentsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 							varEnv.Value = p.Value
 						}
 					}
-					err = environment.InsertVariable(tx, env.ID, varEnv)
+					err = environment.InsertVariable(tx, env.ID, varEnv, c.User)
 					if err != nil {
 						log.Warning("updateEnvironments: Cannot insert variable %s:  %s\n", varEnv.Name, err)
 						return err
@@ -198,7 +198,7 @@ func updateEnvironmentsHandler(w http.ResponseWriter, r *http.Request, db *gorp.
 				varEnv.Value = sdk.PasswordPlaceholder
 				break
 			default:
-				err = environment.InsertVariable(tx, env.ID, varEnv)
+				err = environment.InsertVariable(tx, env.ID, varEnv, c.User)
 				if err != nil {
 					log.Warning("updateEnvironmentsHandler> Cannot insert variables on environments: %s\n", err)
 					return err
@@ -231,7 +231,7 @@ func addEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.DbMa
 	vars := mux.Vars(r)
 	key := vars["permProjectKey"]
 
-	proj, errProj := project.Load(db, key, c.User)
+	proj, errProj := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if errProj != nil {
 		log.Warning("addEnvironmentHandler: Cannot load %s: %s\n", key, errProj)
 		return errProj
@@ -292,7 +292,7 @@ func deleteEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 	projectKey := vars["key"]
 	environmentName := vars["permEnvironmentName"]
 
-	p, errProj := project.Load(db, projectKey, c.User)
+	p, errProj := project.Load(db, projectKey, c.User, project.LoadOptions.Default)
 	if errProj != nil {
 		log.Warning("deleteEnvironmentHandler> Cannot load project %s: %s\n", projectKey, errProj)
 		return errProj
@@ -349,7 +349,7 @@ func updateEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 		return errEnv
 	}
 
-	p, errProj := project.Load(db, projectKey, c.User)
+	p, errProj := project.Load(db, projectKey, c.User, project.LoadOptions.Default)
 	if errProj != nil {
 		log.Warning("updateEnvironmentHandler> Cannot load project %s: %s\n", projectKey, errProj)
 		return errProj
@@ -408,7 +408,7 @@ func updateEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.D
 					varEnv.Value = ""
 				}
 			}
-			err = environment.InsertVariable(tx, env.ID, varEnv)
+			err = environment.InsertVariable(tx, env.ID, varEnv, c.User)
 			if err != nil {
 				log.Warning("updateEnvironmentHandler> Cannot insert variables on environments: %s\n", err)
 				return err
@@ -499,7 +499,7 @@ func cloneEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gorp.Db
 
 	//Insert variables
 	for _, v := range envPost.Variable {
-		if environment.InsertVariable(tx, envPost.ID, &v); err != nil {
+		if environment.InsertVariable(tx, envPost.ID, &v, c.User); err != nil {
 			log.Warning("cloneEnvironmentHandler> Unable to insert variable: %s", err)
 			return err
 		}

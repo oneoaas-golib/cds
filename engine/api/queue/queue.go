@@ -169,7 +169,7 @@ func addJobsToQueue(tx gorp.SqlExecutor, stage *sdk.Stage, pb *sdk.PipelineBuild
 	stage.Status = sdk.StatusBuilding
 
 	for _, job := range stage.Jobs {
-		pbJobParams, errParam := getPipelineBuildJobParameters(tx, job, pb)
+		pbJobParams, errParam := getPipelineBuildJobParameters(tx, job, pb, stage)
 		if errParam != nil {
 			return errParam
 		}
@@ -217,6 +217,8 @@ func syncPipelineBuildJob(db gorp.SqlExecutor, stage *sdk.Stage) (bool, error) {
 			if pbJobDB.Status == sdk.StatusBuilding.String() || pbJobDB.Status == sdk.StatusWaiting.String() {
 				stageEnd = false
 			}
+
+			pbJob.SpawnInfos = pbJobDB.SpawnInfos
 
 			// If same status, sync step status
 			if pbJobDB.Status == pbJob.Status {
@@ -284,8 +286,8 @@ func pipelineBuildEnd(tx gorp.SqlExecutor, pb *sdk.PipelineBuild) error {
 	if len(triggers) > 0 {
 		log.Debug("(v%d) Loaded %d potential triggers for  %s[%s]", pb.Version, len(triggers), pb.Pipeline.Name, pb.Environment.Name)
 	}
-	for _, t := range triggers {
 
+	for _, t := range triggers {
 		// Check prerequisites
 		log.Debug("Checking %d prerequisites for trigger %s/%s/%s -> %s/%s/%s\n", len(t.Prerequisites), t.SrcProject.Key, t.SrcApplication.Name, t.SrcPipeline.Name, t.DestProject.Key, t.DestApplication.Name, t.DestPipeline.Name)
 		prereqOK, err := trigger.CheckPrerequisites(t, pb)
@@ -304,7 +306,7 @@ func pipelineBuildEnd(tx gorp.SqlExecutor, pb *sdk.PipelineBuild) error {
 		parameters = append(parameters, parentParams...)
 
 		// Start build
-		app, err := application.LoadApplicationByName(tx, t.DestProject.Key, t.DestApplication.Name, application.WithClearPassword())
+		app, err := application.LoadByName(tx, t.DestProject.Key, t.DestApplication.Name, nil, application.LoadOptions.WithRepositoryManager, application.LoadOptions.WithTriggers, application.LoadOptions.WithVariablesWithClearPassword)
 		if err != nil {
 			log.Warning("pipelineBuildEnd> Cannot load destination application: %s\n", err)
 			return err
@@ -366,7 +368,7 @@ func ParentBuildInfos(pb *sdk.PipelineBuild) []sdk.Parameter {
 	return params
 }
 
-func getPipelineBuildJobParameters(db gorp.SqlExecutor, j sdk.Job, pb *sdk.PipelineBuild) ([]sdk.Parameter, error) {
+func getPipelineBuildJobParameters(db gorp.SqlExecutor, j sdk.Job, pb *sdk.PipelineBuild, stage *sdk.Stage) ([]sdk.Parameter, error) {
 
 	// Load project Variables
 	projectVariables, err := project.GetAllVariableInProject(db, pb.Pipeline.ProjectID)
@@ -393,5 +395,5 @@ func getPipelineBuildJobParameters(db gorp.SqlExecutor, j sdk.Job, pb *sdk.Pipel
 		return nil, err
 	}
 
-	return action.ProcessActionBuildVariables(projectVariables, appVariables, envVariables, pipelineParameters, pb.Parameters, j.Action), nil
+	return action.ProcessActionBuildVariables(projectVariables, appVariables, envVariables, pipelineParameters, pb.Parameters, stage, j.Action), nil
 }

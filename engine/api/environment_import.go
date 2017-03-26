@@ -12,7 +12,6 @@ import (
 	"github.com/ovh/cds/engine/api/context"
 	"github.com/ovh/cds/engine/api/environment"
 	"github.com/ovh/cds/engine/api/group"
-	"github.com/ovh/cds/engine/api/msg"
 	"github.com/ovh/cds/engine/api/project"
 	"github.com/ovh/cds/engine/api/sanity"
 	"github.com/ovh/cds/engine/log"
@@ -26,7 +25,7 @@ func importNewEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gor
 	key := vars["permProjectKey"]
 	format := r.FormValue("format")
 
-	proj, errProj := project.Load(db, key, c.User)
+	proj, errProj := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if errProj != nil {
 		log.Warning("importNewEnvironmentHandler> Cannot load %s: %s\n", key, errProj)
 		return errProj
@@ -71,8 +70,8 @@ func importNewEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gor
 		eg.Group = *g
 	}
 
-	allMsg := []msg.Message{}
-	msgChan := make(chan msg.Message, 10)
+	allMsg := []sdk.Message{}
+	msgChan := make(chan sdk.Message, 10)
 	done := make(chan bool)
 
 	go func() {
@@ -94,7 +93,7 @@ func importNewEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *gor
 
 	defer tx.Rollback()
 
-	if err := environment.Import(db, proj, env, msgChan); err != nil {
+	if err := environment.Import(db, proj, env, msgChan, c.User); err != nil {
 		log.Warning("importNewEnvironmentHandler> Error on import : %s", err)
 		return err
 	}
@@ -132,7 +131,7 @@ func importIntoEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *go
 	envName := vars["permEnvironmentName"]
 	format := r.FormValue("format")
 
-	proj, errProj := project.Load(db, key, c.User)
+	proj, errProj := project.Load(db, key, c.User, project.LoadOptions.Default)
 	if errProj != nil {
 		log.Warning("importIntoEnvironmentHandler> Cannot load %s: %s\n", key, errProj)
 		return errProj
@@ -196,8 +195,8 @@ func importIntoEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *go
 		eg.Group = *g
 	}
 
-	allMsg := []msg.Message{}
-	msgChan := make(chan msg.Message, 10)
+	allMsg := []sdk.Message{}
+	msgChan := make(chan sdk.Message, 10)
 	done := make(chan bool)
 
 	go func() {
@@ -211,7 +210,7 @@ func importIntoEnvironmentHandler(w http.ResponseWriter, r *http.Request, db *go
 		}
 	}()
 
-	if err := environment.ImportInto(tx, proj, newEnv, env, msgChan); err != nil {
+	if err := environment.ImportInto(tx, proj, newEnv, env, msgChan, c.User); err != nil {
 		log.Warning("importIntoEnvironmentHandler> Error on import : %s", err)
 		return err
 	}

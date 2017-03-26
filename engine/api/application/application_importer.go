@@ -6,7 +6,6 @@ import (
 	"github.com/ovh/cds/engine/api/environment"
 	"github.com/ovh/cds/engine/api/group"
 	"github.com/ovh/cds/engine/api/hook"
-	"github.com/ovh/cds/engine/api/msg"
 	"github.com/ovh/cds/engine/api/pipeline"
 	"github.com/ovh/cds/engine/api/repositoriesmanager"
 	"github.com/ovh/cds/engine/api/trigger"
@@ -15,29 +14,29 @@ import (
 )
 
 //Import is able to create a new application and all its components
-func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repomanager *sdk.RepositoriesManager, user *sdk.User, msgChan chan<- msg.Message) error {
+func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repomanager *sdk.RepositoriesManager, u *sdk.User, msgChan chan<- sdk.Message) error {
 	//Save application in database
-	if err := InsertApplication(db, proj, app); err != nil {
-		return err
+	if err := Insert(db, proj, app); err != nil {
+		return sdk.WrapError(err, "application.Import")
 	}
 
 	if msgChan != nil {
-		msgChan <- msg.New(msg.AppCreated, app.Name)
+		msgChan <- sdk.NewMessage(sdk.MsgAppCreated, app.Name)
 	}
 
 	//Inherit project groups if not provided
 	if app.ApplicationGroups == nil {
 		if msgChan != nil {
-			msgChan <- msg.New(msg.AppGroupInheritPermission, app.Name)
+			msgChan <- sdk.NewMessage(sdk.MsgAppGroupInheritPermission, app.Name)
 		}
 		app.ApplicationGroups = proj.ProjectGroups
 	}
 
-	if err := importVariables(db, proj, app, user, msgChan); err != nil {
+	if err := importVariables(db, proj, app, u, msgChan); err != nil {
 		return err
 	}
 
-	if err := ImportPipelines(db, proj, app, msgChan); err != nil {
+	if err := ImportPipelines(db, proj, app, u, msgChan); err != nil {
 		return err
 	}
 
@@ -53,7 +52,7 @@ func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repoma
 			return err
 		}
 		if msgChan != nil {
-			msgChan <- msg.New(msg.AppGroupSetPermission, g.Name, app.Name)
+			msgChan <- sdk.NewMessage(sdk.MsgAppGroupSetPermission, g.Name, app.Name)
 		}
 	}
 
@@ -68,7 +67,7 @@ func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repoma
 			return err
 		}
 		if msgChan != nil {
-			msgChan <- msg.New(msg.HookCreated, app.RepositoryFullname, app.Pipelines[0].Pipeline.Name)
+			msgChan <- sdk.NewMessage(sdk.MsgHookCreated, app.RepositoryFullname, app.Pipelines[0].Pipeline.Name)
 		}
 	}
 
@@ -76,37 +75,36 @@ func Import(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, repoma
 }
 
 //importVariables is able to create variable on an existing application
-func importVariables(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, user *sdk.User, msgChan chan<- msg.Message) error {
-
+func importVariables(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, u *sdk.User, msgChan chan<- sdk.Message) error {
 	for _, newVar := range app.Variable {
 		var errCreate error
 		switch newVar.Type {
 		case sdk.KeyVariable:
-			errCreate = AddKeyPairToApplication(db, app, newVar.Name)
+			errCreate = AddKeyPairToApplication(db, app, newVar.Name, u)
 			break
 		default:
-			errCreate = InsertVariable(db, app, newVar)
+			errCreate = InsertVariable(db, app, newVar, u)
 			break
 		}
 		if errCreate != nil {
 			log.Warning("importVariables> Cannot add variable %s in application %s:  %s\n", newVar.Name, app.Name, errCreate)
 			return errCreate
 		}
-		if err := CreateAudit(db, newVar.Name, app, user); err != nil {
+		if err := CreateAudit(db, newVar.Name, app, u); err != nil {
 			log.Warning("importVariabitles> Cannot create variable audit for application %s:  %s\n", app.Name, err)
 			return err
 		}
 	}
 
 	if msgChan != nil {
-		msgChan <- msg.New(msg.AppVariablesCreated, app.Name)
+		msgChan <- sdk.NewMessage(sdk.MsgAppVariablesCreated, app.Name)
 	}
 
 	return nil
 }
 
 //ImportPipelines is able to create pipelines on an existing application
-func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, msgChan chan<- msg.Message) error {
+func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Application, u *sdk.User, msgChan chan<- sdk.Message) error {
 	//Import pipelines
 	for i := range app.Pipelines {
 		//Import pipeline
@@ -128,7 +126,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 				return err
 			}
 			if msgChan != nil {
-				msgChan <- msg.New(msg.PipelineAttached, app.Pipelines[i].Pipeline.Name, app.Name)
+				msgChan <- sdk.NewMessage(sdk.MsgPipelineAttached, app.Pipelines[i].Pipeline.Name, app.Name)
 			}
 		}
 	}
@@ -147,7 +145,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 				log.Debug("ImportPipelines> current app")
 			} else {
 				log.Debug("Load t.SrcApplication.Name:%s", t.SrcApplication.Name)
-				srcApp, err := LoadApplicationByName(db, proj.Key, t.SrcApplication.Name)
+				srcApp, err := LoadByName(db, proj.Key, t.SrcApplication.Name, u, LoadOptions.Default)
 				if err != nil {
 					return err
 				}
@@ -172,7 +170,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 			if t.DestApplication.Name == "" {
 				t.DestApplication = *app
 			} else {
-				dest, err := LoadApplicationByName(db, proj.Key, t.DestApplication.Name)
+				dest, err := LoadByName(db, proj.Key, t.DestApplication.Name, u, LoadOptions.Default)
 				if err != nil {
 					return err
 				}
@@ -194,8 +192,8 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 			if t.SrcEnvironment.Name == "" {
 				t.SrcEnvironment = sdk.DefaultEnv
 			} else {
-				if err := environment.Import(db, proj, &t.SrcEnvironment, msgChan); err != nil {
-					return err
+				if err := environment.Import(db, proj, &t.SrcEnvironment, msgChan, u); err != nil {
+					return sdk.WrapError(err, "ImportPipelines> Cannot import environment %s", t.SrcEnvironment.Name)
 				}
 			}
 
@@ -203,8 +201,8 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 			if t.DestEnvironment.Name == "" {
 				t.DestEnvironment = sdk.DefaultEnv
 			} else {
-				if err := environment.Import(db, proj, &t.DestEnvironment, msgChan); err != nil {
-					return err
+				if err := environment.Import(db, proj, &t.DestEnvironment, msgChan, u); err != nil {
+					return sdk.WrapError(err, "ImportPipelines> Cannot import environment %s", t.DestEnvironment.Name)
 				}
 			}
 
@@ -226,7 +224,7 @@ func ImportPipelines(db gorp.SqlExecutor, proj *sdk.Project, app *sdk.Applicatio
 					return err
 				}
 				if msgChan != nil {
-					msgChan <- msg.New(msg.PipelineTriggerCreated, t.SrcPipeline.Name, t.SrcApplication.Name, t.DestPipeline.Name, t.DestApplication.Name)
+					msgChan <- sdk.NewMessage(sdk.MsgPipelineTriggerCreated, t.SrcPipeline.Name, t.SrcApplication.Name, t.DestPipeline.Name, t.DestApplication.Name)
 				}
 
 			}

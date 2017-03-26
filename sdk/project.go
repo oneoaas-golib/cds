@@ -26,6 +26,18 @@ type Project struct {
 	Metadata      Metadata              `json:"metadata" yaml:"metadata" db:"-"`
 }
 
+// ProjectVariableAudit represents an audit on a project variable
+type ProjectVariableAudit struct {
+	ID             int64     `json:"id" yaml:"-" db:"id"`
+	ProjectID      int64     `json:"project_id" yaml:"-" db:"project_id"`
+	VariableID     int64     `json:"variable_id" yaml:"-" db:"variable_id"`
+	Type           string    `json:"type" yaml:"-" db:"type"`
+	VariableBefore *Variable `json:"variable_before,omitempty" yaml:"-" db:"-"`
+	VariableAfter  *Variable `json:"variable_after,omitempty" yaml:"-" db:"-"`
+	Versionned     time.Time `json:"versionned" yaml:"-" db:"versionned"`
+	Author         string    `json:"author" yaml:"-" db:"author"`
+}
+
 // Metadata represents metadata
 type Metadata map[string]string
 
@@ -222,7 +234,7 @@ func UpdateGroupInProject(projectKey, groupname string, permission int) error {
 }
 
 // AddGroupInProject  add a group in a project
-func AddGroupInProject(projectKey, groupname string, permission int, recursive bool) error {
+func AddGroupInProject(projectKey, groupname string, permission int) error {
 
 	if permission < 4 || permission > 7 {
 		return fmt.Errorf("Permission should be between 4-7 \n")
@@ -233,7 +245,6 @@ func AddGroupInProject(projectKey, groupname string, permission int, recursive b
 			Name: groupname,
 		},
 		Permission: permission,
-		Recursive:  recursive,
 	}
 
 	data, err := json.MarshalIndent(groupProject, " ", " ")
@@ -280,7 +291,7 @@ func ShowVariableInProject(projectKey string) ([]Variable, error) {
 }
 
 // AddProjectVariable adds a project wide variable
-func AddProjectVariable(key, name, val string, t VariableType) error {
+func AddProjectVariable(key, name, val string, t string) error {
 	return AddVariableInProject(key, name, val, string(t))
 }
 
@@ -290,7 +301,7 @@ func AddVariableInProject(projectKey, varName, varValue, varType string) error {
 	newVar := Variable{
 		Name:  varName,
 		Value: varValue,
-		Type:  VariableTypeFromString(varType),
+		Type:  varType,
 	}
 
 	data, err := json.Marshal(newVar)
@@ -352,7 +363,7 @@ func UpdateVariableInProject(projectKey, oldName, varName, varValue, varType str
 		ID:    oldVar.ID,
 		Name:  varName,
 		Value: varValue,
-		Type:  VariableTypeFromString(varType),
+		Type:  varType,
 	}
 
 	data, err := json.Marshal(newVar)
